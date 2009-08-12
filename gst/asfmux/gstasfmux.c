@@ -166,7 +166,8 @@ static void gst_asf_mux_get_property (GObject * object,
 static GstStateChangeReturn gst_asf_mux_change_state (GstElement * element,
     GstStateChange transition);
 
-static gboolean gst_asf_mux_sink_event (GstPad * pad, GstEvent * event);
+static gboolean gst_asf_mux_sink_event (GstCollectPads2 * pads,
+    GstCollectData2 * pad, GstEvent * event, GstAsfMux * asfmux);
 
 static void gst_asf_mux_pad_reset (GstAsfPad * data);
 static GstFlowReturn gst_asf_mux_collected (GstCollectPads2 * collect,
@@ -327,6 +328,9 @@ gst_asf_mux_init (GstAsfMux * asfmux)
   gst_element_add_pad (GST_ELEMENT (asfmux), asfmux->srcpad);
 
   asfmux->collect = gst_collect_pads2_new ();
+  gst_collect_pads2_set_event_function (asfmux->collect,
+      (GstCollectPads2EventFunction)
+      GST_DEBUG_FUNCPTR (gst_asf_mux_sink_event), asfmux);
   gst_collect_pads2_set_function (asfmux->collect,
       (GstCollectPads2Function) GST_DEBUG_FUNCPTR (gst_asf_mux_collected),
       asfmux);
@@ -341,13 +345,11 @@ gst_asf_mux_init (GstAsfMux * asfmux)
 }
 
 static gboolean
-gst_asf_mux_sink_event (GstPad * pad, GstEvent * event)
+gst_asf_mux_sink_event (GstCollectPads2 * pads, GstCollectData2 * pad,
+    GstEvent * event, GstAsfMux * asfmux)
 {
-  gboolean ret;
-  GstAsfMux *asfmux;
-  GstAsfPad *asfpad = (GstAsfPad *) gst_pad_get_element_private (pad);
+  GstAsfPad *asfpad = (GstAsfPad *) pad;
 
-  asfmux = GST_ASF_MUX_CAST (gst_pad_get_parent (pad));
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_TAG:{
       GST_DEBUG_OBJECT (asfmux, "received tag event");
@@ -376,9 +378,8 @@ gst_asf_mux_sink_event (GstPad * pad, GstEvent * event)
       break;
   }
 
-  ret = asfmux->collect_event (pad, event);
-  gst_object_unref (asfmux);
-  return ret;
+  /* FIXME when we don't care, what should we return? */
+  return TRUE;
 }
 
 /**
@@ -2155,14 +2156,6 @@ gst_asf_mux_request_new_pad (GstElement * element,
   /* set pad stream number */
   asfmux->stream_number += 1;
   collect_pad->stream_number = asfmux->stream_number;
-
-  /* FIXME: hacked way to override/extend the event function of
-   * GstCollectPads; because it sets its own event function giving
-   * the element no access to events.
-   */
-  asfmux->collect_event = (GstPadEventFunction) GST_PAD_EVENTFUNC (newpad);
-  gst_pad_set_event_function (newpad,
-      GST_DEBUG_FUNCPTR (gst_asf_mux_sink_event));
 
   gst_pad_set_active (newpad, TRUE);
   gst_element_add_pad (element, newpad);
