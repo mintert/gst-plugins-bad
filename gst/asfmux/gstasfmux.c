@@ -372,14 +372,14 @@ gst_asf_mux_sink_event (GstCollectPads2 * pads, GstCollectData2 * pad,
           gst_tag_list_insert (asfpad->taglist, list, GST_TAG_MERGE_REPLACE);
         }
       }
-      break;
+      return TRUE;
     }
     default:
       break;
   }
 
   /* FIXME when we don't care, what should we return? */
-  return TRUE;
+  return FALSE;
 }
 
 /**
