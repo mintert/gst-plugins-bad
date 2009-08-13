@@ -2077,13 +2077,13 @@ gst_qt_mux_sink_event (GstCollectPads2 * pads, GstCollectData2 * data,
       GST_DEBUG_OBJECT (qtmux, "received tag event");
       gst_event_parse_tag (event, &list);
       gst_tag_setter_merge_tags (setter, list, mode);
-      break;
+      return TRUE;
     }
     default:
       break;
   }
   /* FIXME we don't care, what to return? */
-  return TRUE;
+  return FALSE;
 }
 
 static void
