@@ -44,7 +44,7 @@
 #define __GST_QT_MUX_H__
 
 #include <gst/gst.h>
-#include <gst/base/gstcollectpads.h>
+#include <gst/base/gstcollectpads2.h>
 
 #include "fourcc.h"
 #include "atoms.h"
@@ -65,7 +65,7 @@ typedef struct _GstQTMuxClass GstQTMuxClass;
 
 typedef struct _GstQTPad
 {
-  GstCollectData collect;       /* we extend the CollectData */
+  GstCollectData2 collect;       /* we extend the CollectData2 */
 
   /* fourcc id of stream */
   guint32 fourcc;
@@ -100,7 +100,7 @@ struct _GstQTMux
   GstElement element;
 
   GstPad *srcpad;
-  GstCollectPads *collect;
+  GstCollectPads2 *collect;
 
   /* state */
   GstQTMuxState state;
@@ -137,9 +137,6 @@ struct _GstQTMux
    * while playing
    */
   gint current_target_device;
-  
-  /* for collect pads event handling function */
-  GstPadEventFunction collect_event;
 };
 
 struct _GstQTMuxClass
