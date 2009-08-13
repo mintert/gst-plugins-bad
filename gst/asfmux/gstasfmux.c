@@ -171,7 +171,7 @@ static gboolean gst_asf_mux_sink_event (GstCollectPads2 * pads,
 
 static void gst_asf_mux_pad_reset (GstAsfPad * data);
 static GstFlowReturn gst_asf_mux_collected (GstCollectPads2 * collect,
-    gpointer data);
+    GstCollectData2 * data, GstBuffer * buf, GstAsfMux * asfmux);
 
 static GstElementClass *parent_class = NULL;
 
@@ -331,9 +331,9 @@ gst_asf_mux_init (GstAsfMux * asfmux)
   gst_collect_pads2_set_event_function (asfmux->collect,
       (GstCollectPads2EventFunction)
       GST_DEBUG_FUNCPTR (gst_asf_mux_sink_event), asfmux);
-  gst_collect_pads2_set_function (asfmux->collect,
-      (GstCollectPads2Function) GST_DEBUG_FUNCPTR (gst_asf_mux_collected),
-      asfmux);
+  gst_collect_pads2_set_buffer_function (asfmux->collect,
+      (GstCollectPads2BufferFunction)
+      GST_DEBUG_FUNCPTR (gst_asf_mux_collected), asfmux);
 
   asfmux->payloads = NULL;
   asfmux->prop_packet_size = DEFAULT_PACKET_SIZE;
@@ -1792,19 +1792,18 @@ gst_asf_mux_process_buffer (GstAsfMux * asfmux, GstAsfPad * pad,
 }
 
 static GstFlowReturn
-gst_asf_mux_collected (GstCollectPads2 * collect, gpointer data)
+gst_asf_mux_collected (GstCollectPads2 * collect, GstCollectData2 * data,
+    GstBuffer * buf, GstAsfMux * asfmux)
 {
-  GstAsfMux *asfmux = GST_ASF_MUX_CAST (data);
   GstFlowReturn ret = GST_FLOW_OK;
-  GstAsfPad *best_pad = NULL;
-  GstClockTime best_time = GST_CLOCK_TIME_NONE;
-  GstBuffer *buf = NULL;
-  GSList *walk;
+  GstAsfPad *best_pad = (GstAsfPad *) data;
 
   if (G_UNLIKELY (asfmux->state == GST_ASF_MUX_STATE_NONE)) {
     ret = gst_asf_mux_start_file (asfmux);
     if (ret != GST_FLOW_OK) {
       GST_WARNING_OBJECT (asfmux, "Failed to send headers");
+      if (buf)
+        gst_buffer_unref (buf);
       return ret;
     } else {
       asfmux->state = GST_ASF_MUX_STATE_DATA;
@@ -1814,41 +1813,15 @@ gst_asf_mux_collected (GstCollectPads2 * collect, gpointer data)
   if (G_UNLIKELY (asfmux->state == GST_ASF_MUX_STATE_EOS))
     return GST_FLOW_UNEXPECTED;
 
-  /* select the earliest buffer */
-  walk = asfmux->collect->data;
-  while (walk) {
-    GstAsfPad *pad;
-    GstCollectData2 *data;
-    GstClockTime time;
-
-    data = (GstCollectData2 *) walk->data;
-    pad = (GstAsfPad *) data;
-
-    walk = g_slist_next (walk);
-
-    buf = gst_collect_pads2_peek (collect, data);
-    if (buf == NULL) {
-      GST_LOG_OBJECT (asfmux, "Pad %s has no buffers",
-          GST_PAD_NAME (pad->collect.pad));
-      continue;
-    }
-    time = GST_BUFFER_TIMESTAMP (buf);
-    gst_buffer_unref (buf);
-
-    if (best_pad == NULL || !GST_CLOCK_TIME_IS_VALID (time) ||
-        (GST_CLOCK_TIME_IS_VALID (best_time) && time < best_time)) {
-      best_pad = pad;
-      best_time = time;
-    }
-  }
-
   if (best_pad != NULL) {
+    g_assert (buf != NULL);
     /* we have data */
     GST_LOG_OBJECT (asfmux, "selected pad %s with time %" GST_TIME_FORMAT,
-        GST_PAD_NAME (best_pad->collect.pad), GST_TIME_ARGS (best_time));
-    buf = gst_collect_pads2_pop (collect, &best_pad->collect);
+        GST_PAD_NAME (best_pad->collect.pad),
+        GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (buf)));
     ret = gst_asf_mux_process_buffer (asfmux, best_pad, buf);
   } else {
+    g_assert (buf == NULL);
     /* no data, let's finish it up */
     while (asfmux->payloads) {
       ret = gst_asf_mux_flush_payloads (asfmux);
@@ -1856,6 +1829,7 @@ gst_asf_mux_collected (GstCollectPads2 * collect, gpointer data)
         return ret;
       }
     }
+
     g_assert (asfmux->payloads == NULL);
     g_assert (asfmux->payload_data_size == 0);
     /* in 'is-live' mode we don't need to push indexes
