@@ -74,6 +74,7 @@
 
 #include <gst/gst.h>
 #include <gst/base/gstcollectpads.h>
+#include <gst/base/gstbytewriter.h>
 
 #include <sys/types.h>
 #ifdef G_OS_WIN32
@@ -108,7 +109,8 @@ enum
   PROP_DO_CTTS,
   PROP_FLAVOR,
   PROP_FAST_START,
-  PROP_FAST_START_TEMP_FILE
+  PROP_FAST_START_TEMP_FILE,
+  PROP_TARGET_DEVICE
 };
 
 /* some spare for header size as well */
@@ -119,6 +121,7 @@ enum
 #define DEFAULT_DO_CTTS                 FALSE
 #define DEFAULT_FAST_START              FALSE
 #define DEFAULT_FAST_START_TEMP_FILE    NULL
+#define DEFAULT_TARGET_DEVICE           GST_QT_MUX_TARGET_DEVICE_GENERIC
 
 static void gst_qt_mux_finalize (GObject * object);
 
@@ -232,6 +235,13 @@ gst_qt_mux_class_init (GstQTMuxClass * klass)
           "File that will be used temporarily to store data from the stream when "
           "creating a faststart file. If null a filepath will be created automatically",
           DEFAULT_FAST_START_TEMP_FILE, G_PARAM_READWRITE | G_PARAM_CONSTRUCT));
+  if (klass->format == GST_QT_MUX_FORMAT_MP4) {
+    g_object_class_install_property (gobject_class, PROP_TARGET_DEVICE,
+        g_param_spec_enum ("target-device", "The target device",
+            "The device in which the content generated is to be played",
+            GST_QT_MUX_TARGET_DEVICE_TYPE, DEFAULT_TARGET_DEVICE,
+            G_PARAM_READWRITE | G_PARAM_CONSTRUCT));
+  }
 
   gstelement_class->request_new_pad =
       GST_DEBUG_FUNCPTR (gst_qt_mux_request_new_pad);
@@ -326,6 +336,9 @@ gst_qt_mux_init (GstQTMux * qtmux, GstQTMuxClass * qtmux_klass)
       (GstCollectPadsFunction) GST_DEBUG_FUNCPTR (gst_qt_mux_collected), qtmux);
 
   /* properties set to default upon construction */
+
+  /* set this because it only exists as a property in mp4mux */
+  qtmux->current_target_device = GST_QT_MUX_TARGET_DEVICE_GENERIC;
 
   /* always need this */
   qtmux->context =
@@ -1037,7 +1050,7 @@ gst_qt_mux_prepare_and_send_ftyp (GstQTMux * qtmux)
     atom_ftyp_free (qtmux->ftyp);
   gst_qt_mux_map_format_to_header (qtmux_klass->format, &prefix, &major,
       &version, &comp, qtmux->moov, qtmux->longest_chunk,
-      qtmux->fast_start_file != NULL);
+      qtmux->fast_start_file != NULL, qtmux->current_target_device);
   qtmux->ftyp = atom_ftyp_new (qtmux->context, major, version, comp);
   if (comp)
     g_list_free (comp);
@@ -1047,6 +1060,107 @@ gst_qt_mux_prepare_and_send_ftyp (GstQTMux * qtmux)
       return ret;
   }
   return gst_qt_mux_send_ftyp (qtmux, &qtmux->header_size);
+}
+
+#define ATOM_FPRF_SIZE ((2 * 4) + 12)
+#define ATOM_uuidPROF_BASE_SIZE (20 + ATOM_FPRF_SIZE)
+#define ATOM_APRF_SIZE ((8 * 4) + 12)
+#define ATOM_VPRF_SIZE ((10 * 4) + 12)
+
+static void
+gst_byte_writer_put_fourcc (GstByteWriter * bw, guint32 fourcc)
+{
+  guint8 *data = (guint8 *) & fourcc;
+
+  gst_byte_writer_put_uint8 (bw, data[0]);
+  gst_byte_writer_put_uint8 (bw, data[1]);
+  gst_byte_writer_put_uint8 (bw, data[2]);
+  gst_byte_writer_put_uint8 (bw, data[3]);
+}
+
+/* TODO we can fill more info in this atom */
+static GstFlowReturn
+gst_qt_mux_send_uuidPROF_atom (GstQTMux * qtmux)
+{
+  GSList *walk;
+  gint audio, video;
+  GstBuffer *buf;
+  GstFlowReturn ret;
+  guint64 writen_size = 0;
+  GstByteWriter writer;
+
+  GST_DEBUG_OBJECT (qtmux, "Writing uuidPROF atom");
+
+  gst_qt_mux_map_check_tracks (qtmux->moov, &video, &audio, NULL);
+
+  /* we are not using the default atoms.[ch] for performance reasons */
+  buf = gst_buffer_new_and_alloc (ATOM_uuidPROF_BASE_SIZE + audio *
+      ATOM_APRF_SIZE + video * ATOM_VPRF_SIZE);
+
+  gst_byte_writer_init_with_buffer (&writer, buf, FALSE);
+
+  gst_byte_writer_put_uint32_be (&writer, GST_BUFFER_SIZE (buf));
+  gst_byte_writer_put_fourcc (&writer, FOURCC_uuid);
+  gst_byte_writer_put_fourcc (&writer, FOURCC_PROF);
+  gst_byte_writer_put_uint8 (&writer, 0);       /* version */
+  gst_byte_writer_put_uint24_be (&writer, 0);   /* flags */
+  gst_byte_writer_put_uint32_be (&writer, 1 + video + audio);   /* entries */
+
+  /* FPRF atom */
+  gst_byte_writer_put_uint32_be (&writer, ATOM_FPRF_SIZE);
+  gst_byte_writer_put_fourcc (&writer, FOURCC_FPRF);
+  gst_byte_writer_put_uint32_be (&writer, 0);   /* version + flags */
+  gst_byte_writer_put_uint32_be (&writer, 0);   /* function flags */
+  gst_byte_writer_put_uint32_be (&writer, 0);   /* reserved */
+
+  for (walk = qtmux->collect->data; walk; walk = g_slist_next (walk)) {
+    GstCollectData *cdata = (GstCollectData *) walk->data;
+    GstQTPad *qtpad = (GstQTPad *) cdata;
+    AtomTRAK *track = qtpad->trak;
+
+    if (track->is_video) {
+      guint16 width = 0, height = 0;
+      guint32 rate = 0;
+      atom_trak_get_video_info (track, &width, &height, &rate);
+
+      /* write a VPRF atom */
+      gst_byte_writer_put_uint32_be (&writer, ATOM_VPRF_SIZE);
+      gst_byte_writer_put_fourcc (&writer, FOURCC_VPRF);
+      gst_byte_writer_put_uint32_be (&writer, 0);       /* version + flags */
+      gst_byte_writer_put_uint32_be (&writer, track->tkhd.track_ID);
+      gst_byte_writer_put_fourcc (&writer, qtpad->fourcc);
+      gst_byte_writer_put_uint32_be (&writer, 0);       /* codec flags */
+      gst_byte_writer_put_uint32_be (&writer, 0);       /* video flags */
+      gst_byte_writer_put_uint32_be (&writer, 0);       /* avg bitrate */
+      gst_byte_writer_put_uint32_be (&writer, 0);       /* max bitrate */
+      gst_byte_writer_put_uint32_be (&writer, rate);    /* avg framerate */
+      gst_byte_writer_put_uint32_be (&writer, rate);    /* max framerate */
+      gst_byte_writer_put_uint16_be (&writer, width);
+      gst_byte_writer_put_uint16_be (&writer, height);
+      gst_byte_writer_put_uint32_be (&writer, 0);       /* PAR */
+    } else {
+      guint32 rate = 0, channels = 0;
+      atom_trak_get_audio_info (track, &rate, &channels);
+
+      gst_byte_writer_put_uint32_be (&writer, ATOM_APRF_SIZE);
+      gst_byte_writer_put_fourcc (&writer, FOURCC_APRF);
+      gst_byte_writer_put_uint32_be (&writer, 0);       /* version + flags */
+      gst_byte_writer_put_uint32_be (&writer, track->tkhd.track_ID);
+      gst_byte_writer_put_fourcc (&writer, qtpad->fourcc);
+      gst_byte_writer_put_uint32_be (&writer, 0);       /* codec flags */
+      gst_byte_writer_put_uint32_be (&writer, 0);       /* audio flags */
+      gst_byte_writer_put_uint32_be (&writer, 0);       /* avg bitrate */
+      gst_byte_writer_put_uint32_be (&writer, 0);       /* max bitrate */
+      gst_byte_writer_put_uint32_be (&writer, rate);    /* rate */
+      gst_byte_writer_put_uint32_be (&writer, channels);        /* channels */
+    }
+  }
+
+  g_assert (gst_byte_writer_get_remaining (&writer) == 0);
+
+  ret = gst_qt_mux_send_buffer (qtmux, buf, &writen_size, FALSE);
+  qtmux->header_size += writen_size;
+  return ret;
 }
 
 static GstFlowReturn
@@ -1082,6 +1196,14 @@ gst_qt_mux_start_file (GstQTMux * qtmux)
     ret = gst_qt_mux_prepare_and_send_ftyp (qtmux);
     if (ret != GST_FLOW_OK) {
       goto exit;
+    }
+
+    /* we only have psp target in mp4mux */
+    if (qtmux->current_target_device == GST_QT_MUX_TARGET_DEVICE_PSP) {
+      ret = gst_qt_mux_send_uuidPROF_atom (qtmux);
+      if (ret != GST_FLOW_OK) {
+        goto exit;
+      }
     }
 
     /* extended to ensure some spare space */
@@ -1161,6 +1283,15 @@ gst_qt_mux_stop_file (GstQTMux * qtmux)
     if (flow_ret != GST_FLOW_OK) {
       goto ftyp_error;
     }
+
+    /* we only have psp target in mp4mux */
+    if (qtmux->current_target_device == GST_QT_MUX_TARGET_DEVICE_PSP) {
+      ret = gst_qt_mux_send_uuidPROF_atom (qtmux);
+      if (ret != GST_FLOW_OK) {
+        goto uuidPROF_error;
+      }
+    }
+
     /* copy into NULL to obtain size */
     if (!atom_moov_copy_data (qtmux->moov, NULL, &size, &offset))
       goto serialize_error;
@@ -1219,6 +1350,11 @@ serialize_error:
 ftyp_error:
   {
     GST_ELEMENT_ERROR (qtmux, STREAM, MUX, (NULL), ("Failed to send ftyp"));
+    return GST_FLOW_ERROR;
+  }
+uuidPROF_error:
+  {
+    GST_ELEMENT_ERROR (qtmux, STREAM, MUX, (NULL), ("Failed to send uuidPROF"));
     return GST_FLOW_ERROR;
   }
 }
@@ -2039,6 +2175,9 @@ gst_qt_mux_get_property (GObject * object,
     case PROP_FAST_START_TEMP_FILE:
       g_value_set_string (value, qtmux->fast_start_file_path);
       break;
+    case PROP_TARGET_DEVICE:
+      g_value_set_enum (value, qtmux->target_device);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -2091,6 +2230,9 @@ gst_qt_mux_set_property (GObject * object,
         gst_qt_mux_generate_fast_start_file_path (qtmux);
       }
       break;
+    case PROP_TARGET_DEVICE:
+      qtmux->target_device = g_value_get_enum (value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -2109,6 +2251,10 @@ gst_qt_mux_change_state (GstElement * element, GstStateChange transition)
       break;
     case GST_STATE_CHANGE_READY_TO_PAUSED:
       gst_collect_pads_start (qtmux->collect);
+
+      /* set shadow properties */
+      qtmux->current_target_device = qtmux->target_device;
+
       qtmux->state = GST_QT_MUX_STATE_STARTED;
       break;
     case GST_STATE_CHANGE_PAUSED_TO_PLAYING:

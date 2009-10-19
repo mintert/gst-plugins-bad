@@ -1874,6 +1874,10 @@ atom_stsd_copy_data (AtomSTSD * stsd, guint8 ** buffer, guint64 * size,
   return *offset - original_offset;
 }
 
+/*
+ * The order of the children atoms here is according to
+ * PSP order, as it is the only one that requests an explicit order
+ */
 static guint64
 atom_stbl_copy_data (AtomSTBL * stbl, guint8 ** buffer, guint64 * size,
     guint64 * offset)
@@ -1890,27 +1894,26 @@ atom_stbl_copy_data (AtomSTBL * stbl, guint8 ** buffer, guint64 * size,
   if (!atom_stts_copy_data (&stbl->stts, buffer, size, offset)) {
     return 0;
   }
-  /* this atom is optional, so let's check if we need it
-   * (to avoid false error) */
-  if (stbl->stss.entries) {
-    if (!atom_stss_copy_data (&stbl->stss, buffer, size, offset)) {
+  if (stbl->ctts) {
+    if (!atom_ctts_copy_data (stbl->ctts, buffer, size, offset)) {
       return 0;
     }
   }
-
   if (!atom_stsc_copy_data (&stbl->stsc, buffer, size, offset)) {
     return 0;
   }
   if (!atom_stsz_copy_data (&stbl->stsz, buffer, size, offset)) {
     return 0;
   }
-  if (stbl->ctts) {
-    if (!atom_ctts_copy_data (stbl->ctts, buffer, size, offset)) {
-      return 0;
-    }
-  }
   if (!atom_stco64_copy_data (&stbl->stco64, buffer, size, offset)) {
     return 0;
+  }
+  /* this atom is optional, so let's check if we need it
+   * (to avoid false error) */
+  if (stbl->stss.entries) {
+    if (!atom_stss_copy_data (&stbl->stss, buffer, size, offset)) {
+      return 0;
+    }
   }
 
   atom_write_size (buffer, size, offset, original_offset);
@@ -2030,6 +2033,10 @@ atom_mdhd_copy_data (AtomMDHD * mdhd, guint8 ** buffer, guint64 * size,
   return *offset - original_offset;
 }
 
+/*
+ * Order of children here is defined for PSP devices, generic devices
+ * shouldn't care about the order
+ */
 static guint64
 atom_mdia_copy_data (AtomMDIA * mdia, guint8 ** buffer, guint64 * size,
     guint64 * offset)
@@ -2869,6 +2876,29 @@ atom_trak_set_video_commons (AtomTRAK * trak, AtomsContext * context,
 }
 
 void
+atom_trak_get_audio_info (AtomTRAK * trak, guint32 * _rate, guint32 * _channels)
+{
+  guint32 rate = 0, channels = 0;
+
+  AtomSTSD *stsd = &trak->mdia.minf.stbl.stsd;
+  GList *walk = stsd->entries;
+  for (; walk != NULL; walk = g_list_next (walk)) {
+    SampleTableEntry *entry = (SampleTableEntry *) walk;
+    if (entry->kind == AUDIO) {
+      SampleTableEntryMP4A *audio = (SampleTableEntryMP4A *) entry;
+      rate = audio->sample_rate;
+      channels = audio->channels;
+      break;
+    }
+  }
+
+  if (_rate)
+    *_rate = rate;
+  if (_channels)
+    *_channels = channels;
+}
+
+void
 atom_trak_set_audio_type (AtomTRAK * trak, AtomsContext * context,
     AudioSampleEntry * entry, guint32 scale, AtomInfo * ext, gint sample_size)
 {
@@ -2917,6 +2947,25 @@ build_pasp_extension (AtomTRAK * trak, gint par_width, gint par_height)
 
   return build_atom_info_wrapper ((Atom *) atom_data, atom_data_copy_data,
       atom_data_free);
+}
+
+void
+atom_trak_get_video_info (AtomTRAK * trak, guint16 * _width,
+    guint16 * _height, guint32 * _fps)
+{
+  guint16 width, height;
+  guint32 fps;
+
+  width = trak->tkhd.width >> 16;
+  height = trak->tkhd.height & 0xFFFF;
+  fps = trak->mdia.mdhd.time_info.timescale;
+
+  if (_width)
+    *_width = width;
+  if (_height)
+    *_height = height;
+  if (_fps)
+    *_fps = fps;
 }
 
 void

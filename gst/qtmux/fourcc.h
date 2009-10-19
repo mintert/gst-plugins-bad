@@ -170,6 +170,7 @@ G_BEGIN_DECLS
 #define FOURCC_jpeg     GST_MAKE_FOURCC('j','p','e','g')
 #define FOURCC_mjp2     GST_MAKE_FOURCC('m','j','p','2')
 #define FOURCC_jp2h     GST_MAKE_FOURCC('j','p','2','h')
+#define FOURCC_uuid     GST_MAKE_FOURCC('u','u','i','d')
 
 /* Xiph fourcc */
 #define FOURCC_XiTh     GST_MAKE_FOURCC('X','i','T','h')
@@ -190,6 +191,12 @@ G_BEGIN_DECLS
 #define FOURCC_albm     GST_MAKE_FOURCC('a','l','b','m')
 #define FOURCC_loci     GST_MAKE_FOURCC('l','o','c','i')
 #define FOURCC_kywd     GST_MAKE_FOURCC('k','y','w','d')
+
+/* PSP fourcc */
+#define FOURCC_PROF     GST_MAKE_FOURCC('P','R','O','F')
+#define FOURCC_FPRF     GST_MAKE_FOURCC('F','P','R','F')
+#define FOURCC_APRF     GST_MAKE_FOURCC('A','P','R','F')
+#define FOURCC_VPRF     GST_MAKE_FOURCC('V','P','R','F')
 
 G_END_DECLS
 

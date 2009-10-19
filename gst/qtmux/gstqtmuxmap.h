@@ -69,13 +69,27 @@ typedef struct _GstQTMuxFormatProp
   GstStaticCaps audio_sink_caps;
 } GstQTMuxFormatProp;
 
+enum {
+  GST_QT_MUX_TARGET_DEVICE_GENERIC = 0,
+  GST_QT_MUX_TARGET_DEVICE_PSP = 1
+};
+
+#define GST_QT_MUX_TARGET_DEVICE_TYPE (gst_qt_mux_target_device_get_type())
+GType           gst_qt_mux_target_device_get_type    (void);
+
 extern GstQTMuxFormatProp gst_qt_mux_format_list[];
+
+void            gst_qt_mux_map_check_tracks          (AtomMOOV * moov,
+                                                      gint * _video,
+                                                      gint * _audio,
+                                                      gboolean * _has_h264);
 
 void            gst_qt_mux_map_format_to_header      (GstQTMuxFormat format, GstBuffer ** _prefix,
                                                       guint32 * _major, guint32 * verson,
                                                       GList ** _compatible, AtomMOOV * moov,
                                                       GstClockTime longest_chunk,
-                                                      gboolean faststart);
+                                                      gboolean faststart,
+                                                      gint target_device);
 
 AtomsTreeFlavor gst_qt_mux_map_format_to_flavor      (GstQTMuxFormat format);
 

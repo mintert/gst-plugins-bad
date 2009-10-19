@@ -550,7 +550,6 @@ typedef struct _AtomWAVE
   GList *extension_atoms;
 } AtomWAVE;
 
-
 /*
  * Function to serialize an atom
  */
@@ -637,6 +636,11 @@ void atom_trak_set_audio_type (AtomTRAK * trak, AtomsContext * context,
 void atom_trak_set_video_type (AtomTRAK * trak, AtomsContext * context,
                                VisualSampleEntry * entry, guint32 rate,
                                AtomInfo * ext);
+
+void atom_trak_get_video_info (AtomTRAK * trak, guint16 * width,
+                               guint16 * height, guint32 * fps);
+void atom_trak_get_audio_info (AtomTRAK * trak, guint32 * rate,
+                               guint32 * channels);
 
 AtomInfo *   build_codec_data_extension  (guint32 fourcc, const GstBuffer * codec_data);
 AtomInfo *   build_mov_aac_extension     (AtomTRAK * trak, const GstBuffer * codec_data);

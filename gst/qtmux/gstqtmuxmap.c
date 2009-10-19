@@ -124,6 +124,24 @@
   "rate = (int) 16000, " \
   "channels = [ 1, 2 ] "
 
+GType
+gst_qt_mux_target_device_get_type (void)
+{
+  static GType gst_qt_mux_target_device_type = 0;
+  static GEnumValue gst_qt_mux_target_device[] = {
+    {GST_QT_MUX_TARGET_DEVICE_GENERIC, "Generic", "generic"},
+    {GST_QT_MUX_TARGET_DEVICE_PSP, "PSP", "psp"},
+    {0, NULL, NULL}
+  };
+
+  if (!gst_qt_mux_target_device_type) {
+    gst_qt_mux_target_device_type =
+        g_enum_register_static ("GstQtMuxTargetDevice",
+        gst_qt_mux_target_device);
+  }
+  return gst_qt_mux_target_device_type;
+}
+
 /* FIXME 0.11 - take a look at bugs #580005 and #340375 */
 GstQTMuxFormatProp gst_qt_mux_format_list[] = {
   /* original QuickTime format; see Apple site (e.g. qtff.pdf) */
@@ -207,7 +225,7 @@ gst_qt_mux_map_format_to_flavor (GstQTMuxFormat format)
     return ATOMS_TREE_FLAVOR_ISOM;
 }
 
-static void
+void
 gst_qt_mux_map_check_tracks (AtomMOOV * moov, gint * _video, gint * _audio,
     gboolean * _has_h264)
 {
@@ -240,12 +258,17 @@ gst_qt_mux_map_check_tracks (AtomMOOV * moov, gint * _video, gint * _audio,
  * - avc1 brand is not used, since the specific extensions indicated by it
  *   are not used (e.g. sample groupings, etc)
  * - TODO: maybe even more 3GPP brand fine-tuning ??
- *   (but that might need ftyp rewriting at the end) */
+ *   (but that might need ftyp rewriting at the end) 
+ * - TODO: we are starting to have many parameters extra parameters for brand
+ *   fine-tuning here, maybe we should refactor all those to a single struct
+ *   that would group this info
+ */
 void
 gst_qt_mux_map_format_to_header (GstQTMuxFormat format, GstBuffer ** _prefix,
     guint32 * _major, guint32 * _version, GList ** _compatible, AtomMOOV * moov,
-    GstClockTime longest_chunk, gboolean faststart)
+    GstClockTime longest_chunk, gboolean faststart, gint target_device)
 {
+  /* TODO shouldn't the major brands be in the compatible brands? */
   static guint32 qt_brands[] = { 0 };
   static guint32 mp4_brands[] = { FOURCC_mp41, FOURCC_isom, FOURCC_iso2, 0 };
   static guint32 gpp_brands[] = { FOURCC_isom, FOURCC_iso2, 0 };
@@ -269,7 +292,12 @@ gst_qt_mux_map_format_to_header (GstQTMuxFormat format, GstBuffer ** _prefix,
       version = 0x20050300;
       break;
     case GST_QT_MUX_FORMAT_MP4:
-      major = FOURCC_mp42;
+      if (target_device == GST_QT_MUX_TARGET_DEVICE_PSP) {
+        major = FOURCC_MSNV;
+        result = g_list_append (result, GUINT_TO_POINTER (FOURCC_MSNV));
+        version = 0xF0001FFF;
+      } else
+        major = FOURCC_mp42;
       comp = mp4_brands;
       break;
     case GST_QT_MUX_FORMAT_3GP:

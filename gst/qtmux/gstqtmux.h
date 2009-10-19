@@ -130,7 +130,14 @@ struct _GstQTMux
   gboolean large_file;
   gboolean guess_pts;
   gchar *fast_start_file_path;
+  gint target_device;
 
+  /*
+   * shadow copy properties, for properties that can't change
+   * while playing
+   */
+  gint current_target_device;
+  
   /* for collect pads event handling function */
   GstPadEventFunction collect_event;
 };
