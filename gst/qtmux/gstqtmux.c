@@ -1853,6 +1853,7 @@ gst_qt_mux_video_sink_set_caps (GstPad * pad, GstCaps * caps)
   const GstBuffer *codec_data = NULL;
   VisualSampleEntry entry = { 0, };
   GstQTMuxFormat format;
+  GList *ext_atom_list = NULL;
   AtomInfo *ext_atom = NULL;
   gboolean sync = FALSE;
   int par_num, par_den;
@@ -1942,6 +1943,8 @@ gst_qt_mux_video_sink_set_caps (GstPad * pad, GstCaps * caps)
     else
       entry.fourcc = FOURCC_s263;
     ext_atom = build_h263_extension ();
+    if (ext_atom)
+      ext_atom_list = g_list_append (ext_atom_list, ext_atom);
   } else if (strcmp (mimetype, "video/x-divx") == 0 ||
       strcmp (mimetype, "video/mpeg") == 0) {
     gint version = 0;
@@ -1958,6 +1961,8 @@ gst_qt_mux_video_sink_set_caps (GstPad * pad, GstCaps * caps)
       ext_atom =
           build_esds_extension (qtpad->trak, ESDS_OBJECT_TYPE_MPEG4_P2,
           ESDS_STREAM_TYPE_VISUAL, codec_data);
+      if (ext_atom)
+        ext_atom_list = g_list_append (ext_atom_list, ext_atom);
       if (!codec_data)
         GST_WARNING_OBJECT (qtmux, "no codec_data for MPEG4 video; "
             "output might not play in Apple QuickTime (try global-headers?)");
@@ -1968,6 +1973,8 @@ gst_qt_mux_video_sink_set_caps (GstPad * pad, GstCaps * caps)
     if (!codec_data)
       GST_WARNING_OBJECT (qtmux, "no codec_data in h264 caps");
     ext_atom = build_codec_data_extension (FOURCC_avcC, codec_data);
+    if (ext_atom)
+      ext_atom_list = g_list_append (ext_atom_list, ext_atom);
   } else if (strcmp (mimetype, "video/x-dv") == 0) {
     gint version = 0;
     gboolean pal = TRUE;
@@ -2001,12 +2008,32 @@ gst_qt_mux_video_sink_set_caps (GstPad * pad, GstCaps * caps)
     sync = FALSE;
   } else if (strcmp (mimetype, "image/x-j2c") == 0) {
     guint32 fourcc;
+    const GValue *cmap_array;
+    const GValue *cdef_array;
+    gint ncomp = 0;
+    gint fields = 1;
+
+    gst_structure_get_int (structure, "num-components", &ncomp);
+    gst_structure_get_int (structure, "fields", &fields);
+    cmap_array = gst_structure_get_value (structure, "component-map");
+    cdef_array = gst_structure_get_value (structure, "channel-definitions");
 
     entry.fourcc = FOURCC_mjp2;
     sync = FALSE;
-    if (!gst_structure_get_fourcc (structure, "fourcc", &fourcc) ||
-        !(ext_atom =
-            build_jp2h_extension (qtpad->trak, width, height, fourcc))) {
+    if (gst_structure_get_fourcc (structure, "fourcc", &fourcc) &&
+        (ext_atom =
+            build_jp2h_extension (qtpad->trak, width, height, fourcc, ncomp,
+                cmap_array, cdef_array)) != NULL) {
+      ext_atom_list = g_list_append (ext_atom_list, ext_atom);
+
+      ext_atom = build_fiel_extension (fields);
+      if (ext_atom)
+        ext_atom_list = g_list_append (ext_atom_list, ext_atom);
+
+      ext_atom = build_jp2x_extension (codec_data);
+      if (ext_atom)
+        ext_atom_list = g_list_append (ext_atom_list, ext_atom);
+    } else {
       GST_DEBUG_OBJECT (qtmux, "missing or invalid fourcc in jp2 caps");
       goto refuse_caps;
     }
@@ -2033,7 +2060,7 @@ gst_qt_mux_video_sink_set_caps (GstPad * pad, GstCaps * caps)
   qtpad->fourcc = entry.fourcc;
   qtpad->sync = sync;
   atom_trak_set_video_type (qtpad->trak, qtmux->context, &entry, rate,
-      ext_atom);
+      ext_atom_list);
 
   gst_object_unref (qtmux);
   return TRUE;
