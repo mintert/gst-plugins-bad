@@ -234,6 +234,7 @@ gst_mss_demux_stream_new (GstMssDemux * mssdemux,
   stream->downloader = gst_uri_downloader_new ();
   stream->dataqueue =
       gst_data_queue_new (_data_queue_check_full, NULL, NULL, stream);
+  g_mutex_init (&stream->mutex);
 
   /* Downloading task */
   g_rec_mutex_init (&stream->download_lock);
@@ -292,6 +293,7 @@ gst_mss_demux_stream_free (GstMssDemuxStream * stream)
   }
   if (stream->caps)
     gst_caps_unref (stream->caps);
+  g_mutex_clear (&stream->mutex);
   g_free (stream);
 }
 
@@ -637,6 +639,52 @@ gst_mss_demux_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
       gst_event_unref (event);
       return TRUE;
     }
+    case GST_EVENT_RECONFIGURE:{
+      GSList *iter;
+
+      for (iter = mssdemux->streams; iter; iter = g_slist_next (iter)) {
+        GstMssDemuxStream *stream = iter->data;
+
+        if (stream->pad == pad) {
+          GST_MSS_DEMUX_STREAM_LOCK (stream);
+          if (GST_TASK_STATE (stream->download_task) == GST_TASK_PAUSED) {
+            GstClockTime cur =
+                GST_CLOCK_TIME_IS_VALID (stream->next_timestamp) ? stream->
+                next_timestamp : 0;
+            GstClockTime ts = GST_CLOCK_TIME_NONE;
+            GstEvent *gap;
+
+            GST_DEBUG_OBJECT (mssdemux,
+                "Activating stream %p due to reconfigure " "event", stream);
+
+            /* enable this stream again,
+             * seek to the smallest timestamps on all active streams */
+            for (iter = mssdemux->streams; iter; iter = g_slist_next (iter)) {
+              GstMssDemuxStream *other = iter->data;
+
+              /* TODO it might be possible that the stream that was previously
+               * active has already switched into not-lined */
+              if (other->last_ret != GST_FLOW_NOT_LINKED) {
+                ts = MIN (ts, other->next_timestamp);
+              }
+            }
+            if (GST_CLOCK_TIME_IS_VALID (ts)) {
+              gst_mss_stream_seek (stream->manifest_stream, ts);
+              gap = gst_event_new_gap (cur, ts - cur);
+              gst_event_set_seqnum (gap, gst_event_get_seqnum (event));
+              gst_pad_push_event (pad, gap);
+            }
+            stream->last_ret = GST_FLOW_OK;
+
+            gst_task_start (stream->download_task);
+          }
+          GST_MSS_DEMUX_STREAM_UNLOCK (stream);
+          gst_event_unref (event);
+          return TRUE;
+        }
+      }
+    }
+      break;
     default:
       break;
   }
@@ -1061,6 +1109,13 @@ gst_mss_demux_stream_download_fragment (GstMssDemuxStream * stream,
   GstFlowReturn ret = GST_FLOW_OK;
   guint64 before_download, after_download;
 
+  /* special case for not-linked streams */
+  if (stream->last_ret == GST_FLOW_NOT_LINKED) {
+    GST_DEBUG_OBJECT (mssdemux, "Skipping download for not-linked stream %p",
+        stream);
+    return GST_FLOW_NOT_LINKED;
+  }
+
   before_download = g_get_real_time ();
 
   GST_DEBUG_OBJECT (mssdemux, "Getting url for stream %p", stream);
@@ -1184,6 +1239,8 @@ gst_mss_demux_download_loop (GstMssDemuxStream * stream)
       goto eos;
     case GST_FLOW_ERROR:
       goto error;
+    case GST_FLOW_NOT_LINKED:
+      goto notlinked;
     default:
       break;
   }
@@ -1222,6 +1279,15 @@ cancelled:
     gst_task_pause (stream->download_task);
     return;
   }
+notlinked:
+  {
+    GST_MSS_DEMUX_STREAM_LOCK (stream);
+    if (stream->last_ret == GST_FLOW_NOT_LINKED) {
+      gst_task_pause (stream->download_task);
+      gst_data_queue_flush (stream->dataqueue);
+    }
+    GST_MSS_DEMUX_STREAM_UNLOCK (stream);
+  }
 }
 
 static GstFlowReturn
@@ -1242,7 +1308,9 @@ gst_mss_demux_select_latest_stream (GstMssDemux * mssdemux,
     GstDataQueueItem *item;
 
     other = iter->data;
-    if (other->eos) {
+    if (other->eos || other->last_ret == GST_FLOW_NOT_LINKED) {
+      GST_DEBUG_OBJECT (mssdemux, "Skipping stream %p eos:%d last-ret:%d",
+          other, other->eos, other->last_ret);
       continue;
     }
 
@@ -1332,17 +1400,20 @@ gst_mss_demux_stream_loop (GstMssDemux * mssdemux)
 
     GST_DEBUG_OBJECT (mssdemux,
         "Pushing buffer %p %" GST_TIME_FORMAT ", duration %" GST_TIME_FORMAT
-        " discont:%d on pad %s", object,
+        " discont:%d on pad %s:%s", object,
         GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (object)),
         GST_TIME_ARGS (GST_BUFFER_DURATION (object)),
         GST_BUFFER_FLAG_IS_SET (object, GST_BUFFER_FLAG_DISCONT),
-        GST_PAD_NAME (stream->pad));
+        GST_DEBUG_PAD_NAME (stream->pad));
 
     stream->next_timestamp =
         GST_BUFFER_TIMESTAMP (object) + GST_BUFFER_DURATION (object);
 
     stream->have_data = TRUE;
-    ret = gst_pad_push (stream->pad, GST_BUFFER_CAST (object));
+    stream->last_ret = ret =
+        gst_pad_push (stream->pad, GST_BUFFER_CAST (object));
+    GST_DEBUG_OBJECT (mssdemux, "Pushed on pad %s:%s result: %d (%s)",
+        GST_DEBUG_PAD_NAME (stream->pad), ret, gst_flow_get_name (ret));
   } else if (GST_IS_EVENT (object)) {
     if (GST_EVENT_TYPE (object) == GST_EVENT_EOS) {
       stream->eos = TRUE;
@@ -1360,7 +1431,8 @@ gst_mss_demux_stream_loop (GstMssDemux * mssdemux)
     case GST_FLOW_ERROR:
       goto error;
     case GST_FLOW_NOT_LINKED:
-      break;                    /* TODO what to do here? pause the task or just keep pushing? */
+      /* stream won't download any more data until it gets a reconfigure */
+      break;
     case GST_FLOW_OK:
     default:
       break;
