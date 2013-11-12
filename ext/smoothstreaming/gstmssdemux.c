@@ -638,6 +638,20 @@ gst_mss_demux_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
       gst_event_unref (event);
       return TRUE;
     }
+    case GST_EVENT_RECONFIGURE:{
+      GSList *iter;
+
+      for (iter = mssdemux->streams; iter; iter = g_slist_next (iter)) {
+        GstMssDemuxStream *stream = iter->data;
+
+        if (stream->pad == pad) {
+          /* enable this stream again */
+          stream->last_ret = GST_FLOW_OK;
+          break;
+        }
+      }
+    }
+      break;
     default:
       break;
   }
@@ -1062,6 +1076,16 @@ gst_mss_demux_stream_download_fragment (GstMssDemuxStream * stream,
   GstFlowReturn ret = GST_FLOW_OK;
   guint64 before_download, after_download;
 
+  /* special case for not-linked streams */
+  if (stream->last_ret == GST_FLOW_NOT_LINKED) {
+    GST_DEBUG_OBJECT (mssdemux, "Skipping download for not-linked stream %p",
+        stream);
+    /* Lie to our caller that we got a buffer, but it doesn't matter because
+     * it is not linked. */
+    *buffer_downloaded = TRUE;
+    return GST_FLOW_OK;
+  }
+
   before_download = g_get_real_time ();
 
   GST_DEBUG_OBJECT (mssdemux, "Getting url for stream %p", stream);
@@ -1243,7 +1267,7 @@ gst_mss_demux_select_latest_stream (GstMssDemux * mssdemux,
     GstDataQueueItem *item;
 
     other = iter->data;
-    if (other->eos) {
+    if (other->eos || other->last_ret == GST_FLOW_NOT_LINKED) {
       continue;
     }
 
@@ -1343,7 +1367,8 @@ gst_mss_demux_stream_loop (GstMssDemux * mssdemux)
         GST_BUFFER_TIMESTAMP (object) + GST_BUFFER_DURATION (object);
 
     stream->have_data = TRUE;
-    ret = gst_pad_push (stream->pad, GST_BUFFER_CAST (object));
+    stream->last_ret = ret =
+        gst_pad_push (stream->pad, GST_BUFFER_CAST (object));
   } else if (GST_IS_EVENT (object)) {
     if (GST_EVENT_TYPE (object) == GST_EVENT_EOS) {
       stream->eos = TRUE;
@@ -1361,7 +1386,8 @@ gst_mss_demux_stream_loop (GstMssDemux * mssdemux)
     case GST_FLOW_ERROR:
       goto error;
     case GST_FLOW_NOT_LINKED:
-      break;                    /* TODO what to do here? pause the task or just keep pushing? */
+      /* stream won't download any more data until it gets a reconfigure */
+      break;
     case GST_FLOW_OK:
     default:
       break;

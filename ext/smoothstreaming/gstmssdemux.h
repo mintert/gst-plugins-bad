@@ -72,6 +72,7 @@ struct _GstMssDemuxStream {
   GstTask *download_task;
   GRecMutex download_lock;
 
+  GstFlowReturn last_ret;
   gboolean eos;
   gboolean have_data;
   gboolean cancelled;
