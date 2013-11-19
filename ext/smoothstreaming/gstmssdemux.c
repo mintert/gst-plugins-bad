@@ -647,35 +647,9 @@ gst_mss_demux_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
 
         if (stream->pad == pad) {
           GST_MSS_DEMUX_STREAM_LOCK (stream);
-          if (GST_TASK_STATE (stream->download_task) == GST_TASK_PAUSED) {
-            GstClockTime cur =
-                GST_CLOCK_TIME_IS_VALID (stream->next_timestamp) ? stream->
-                next_timestamp : 0;
-            GstClockTime ts = GST_CLOCK_TIME_NONE;
-            GstEvent *gap;
-
-            GST_DEBUG_OBJECT (mssdemux,
-                "Activating stream %p due to reconfigure " "event", stream);
-
-            /* enable this stream again,
-             * seek to the smallest timestamps on all active streams */
-            for (iter = mssdemux->streams; iter; iter = g_slist_next (iter)) {
-              GstMssDemuxStream *other = iter->data;
-
-              /* TODO it might be possible that the stream that was previously
-               * active has already switched into not-lined */
-              if (other->last_ret != GST_FLOW_NOT_LINKED) {
-                ts = MIN (ts, other->next_timestamp);
-              }
-            }
-            if (GST_CLOCK_TIME_IS_VALID (ts)) {
-              gst_mss_stream_seek (stream->manifest_stream, ts);
-              gap = gst_event_new_gap (cur, ts - cur);
-              gst_event_set_seqnum (gap, gst_event_get_seqnum (event));
-              gst_pad_push_event (pad, gap);
-            }
-            stream->last_ret = GST_FLOW_OK;
-
+          if (GST_TASK_STATE (stream->download_task) == GST_TASK_PAUSED
+              && stream->last_ret == GST_FLOW_NOT_LINKED) {
+            stream->restart_download = TRUE;
             gst_task_start (stream->download_task);
           }
           GST_MSS_DEMUX_STREAM_UNLOCK (stream);
@@ -1221,6 +1195,61 @@ gst_mss_demux_download_loop (GstMssDemuxStream * stream)
   GST_LOG_OBJECT (mssdemux, "download loop start %p", stream);
 
   GST_OBJECT_LOCK (mssdemux);
+  if (G_UNLIKELY (stream->restart_download)) {
+    GSList *iter;
+    GstClockTime cur, ts;
+    gint64 pos;
+    GstEvent *gap;
+
+    GST_MSS_DEMUX_STREAM_LOCK (stream);
+
+    GST_DEBUG_OBJECT (mssdemux,
+        "Activating stream %p due to reconfigure " "event", stream);
+
+    cur = GST_CLOCK_TIME_IS_VALID (stream->next_timestamp) ?
+        stream->next_timestamp : 0;
+
+    if (gst_pad_peer_query_position (stream->pad, GST_FORMAT_TIME, &pos)) {
+      ts = (GstClockTime) pos;
+      GST_DEBUG_OBJECT (mssdemux, "Downstream position: %"
+          GST_TIME_FORMAT, GST_TIME_ARGS (ts));
+    } else {
+      ts = GST_CLOCK_TIME_NONE;
+
+      GST_DEBUG_OBJECT (mssdemux, "Downstream position query failed, "
+          "failling back to looking at other pads");
+
+      /* enable this stream again,
+       * seek to the smallest timestamps on all active streams */
+      for (iter = mssdemux->streams; iter; iter = g_slist_next (iter)) {
+        GstMssDemuxStream *other = iter->data;
+
+        /* TODO it might be possible that the stream that was previously
+         * active has already switched into not-lined */
+        if (other->last_ret != GST_FLOW_NOT_LINKED) {
+          ts = MIN (ts, other->next_timestamp);
+        }
+      }
+    }
+
+    GST_DEBUG_OBJECT (mssdemux, "Restarting stream %p %s:%s at "
+        "position %" GST_TIME_FORMAT, stream,
+        GST_DEBUG_PAD_NAME (stream->pad), GST_TIME_ARGS (ts));
+
+    if (GST_CLOCK_TIME_IS_VALID (ts)) {
+      gst_mss_stream_seek (stream->manifest_stream, ts);
+
+      if (cur < ts) {
+        gap = gst_event_new_gap (cur, ts - cur);
+        gst_pad_push_event (stream->pad, gap);
+      }
+    }
+    stream->last_ret = GST_FLOW_OK;
+    stream->restart_download = FALSE;
+    gst_task_start (mssdemux->stream_task);
+    GST_MSS_DEMUX_STREAM_UNLOCK (stream);
+  }
+
   GST_DEBUG_OBJECT (mssdemux,
       "Starting streams reconfiguration due to bitrate changes");
   gst_mss_demux_reconfigure_stream (stream);
@@ -1357,6 +1386,8 @@ gst_mss_demux_stream_loop (GstMssDemux * mssdemux)
     GST_DEBUG_OBJECT (mssdemux, "No streams selected -> %d - %s", ret,
         gst_flow_get_name (ret));
 
+  /* Lock as this may change the tasks state */
+  GST_OBJECT_LOCK (mssdemux);
   switch (ret) {
     case GST_FLOW_OK:
       break;
@@ -1370,6 +1401,7 @@ gst_mss_demux_stream_loop (GstMssDemux * mssdemux)
     default:
       g_assert_not_reached ();
   }
+  GST_OBJECT_UNLOCK (mssdemux);
 
   GST_LOG_OBJECT (mssdemux, "popping next item from queue for stream %p %s",
       stream, GST_PAD_NAME (stream->pad));
@@ -1425,6 +1457,8 @@ gst_mss_demux_stream_loop (GstMssDemux * mssdemux)
     g_return_if_reached ();
   }
 
+  /* Lock as this may change the tasks state */
+  GST_OBJECT_LOCK (mssdemux);
   switch (ret) {
     case GST_FLOW_EOS:
       goto eos;                 /* EOS ? */
@@ -1437,6 +1471,7 @@ gst_mss_demux_stream_loop (GstMssDemux * mssdemux)
     default:
       break;
   }
+  GST_OBJECT_UNLOCK (mssdemux);
 
   GST_LOG_OBJECT (mssdemux, "Stream loop end");
   return;
@@ -1445,18 +1480,21 @@ eos:
   {
     GST_DEBUG_OBJECT (mssdemux, "EOS on all pads");
     gst_task_pause (mssdemux->stream_task);
+    GST_OBJECT_UNLOCK (mssdemux);
     return;
   }
 error:
   {
     GST_WARNING_OBJECT (mssdemux, "Error while pushing fragment");
     gst_task_pause (mssdemux->stream_task);
+    GST_OBJECT_UNLOCK (mssdemux);
     return;
   }
 stop:
   {
     GST_DEBUG_OBJECT (mssdemux, "Pausing streaming task");
     gst_task_pause (mssdemux->stream_task);
+    GST_OBJECT_UNLOCK (mssdemux);
     return;
   }
 }
