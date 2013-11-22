@@ -72,6 +72,7 @@ struct _GstMssDemuxStream {
   GstEvent *pending_newsegment;
 
   GstClockTime next_timestamp;
+  GstClockTime catch_up_timestamp;
 
   /* Downloading task */
   GstTask *download_task;
