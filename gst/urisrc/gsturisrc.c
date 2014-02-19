@@ -34,6 +34,7 @@
 #include "gsturisrc.h"
 
 #include <string.h>
+#include <gst/gst-i18n-plugin.h>
 
 GST_DEBUG_CATEGORY (uri_src_debug);
 #define GST_CAT_DEFAULT (uri_src_debug)
@@ -110,20 +111,86 @@ gst_uri_src_finalize (GObject * object)
 }
 
 static void
+gst_uri_src_update_src (GstUriSrc * urisrc)
+{
+  GST_OBJECT_LOCK (urisrc);
+  if (urisrc->src) {
+    gchar *old_protocol, *new_protocol;
+    gchar *old_uri;
+
+    old_uri = gst_uri_handler_get_uri (GST_URI_HANDLER (urisrc->src));
+    old_protocol = gst_uri_get_protocol (old_uri);
+    new_protocol = gst_uri_get_protocol (urisrc->uri);
+
+    if (!g_str_equal (old_protocol, new_protocol)) {
+      gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (urisrc->srcpad), NULL);
+      gst_element_set_state (urisrc->src, GST_STATE_NULL);
+      gst_bin_remove (GST_BIN_CAST (urisrc), urisrc->src);
+      urisrc->src = NULL;
+      GST_DEBUG_OBJECT (urisrc, "Can't re-use old source element");
+    } else {
+      GError *err = NULL;
+
+      GST_DEBUG_OBJECT (urisrc, "Re-using old source element");
+      if (!gst_uri_handler_set_uri (GST_URI_HANDLER (urisrc->src),
+              urisrc->uri, &err)) {
+        GST_DEBUG_OBJECT (urisrc, "Failed to re-use old source element: %s",
+            err->message);
+        g_clear_error (&err);
+        gst_element_set_state (urisrc->src, GST_STATE_NULL);
+        gst_object_unref (urisrc->src);
+        urisrc->src = NULL;
+      }
+    }
+    g_free (old_uri);
+    g_free (old_protocol);
+    g_free (new_protocol);
+  }
+
+  if (!urisrc->src) {
+    GST_DEBUG_OBJECT (urisrc, "Creating source element for the URI:%s",
+        urisrc->uri);
+    urisrc->src =
+        gst_element_make_from_uri (GST_URI_SRC, urisrc->uri, NULL, NULL);
+    if (urisrc->src) {
+      GstPad *pad = gst_element_get_static_pad (urisrc->src, "src");
+
+      gst_bin_add (GST_BIN_CAST (urisrc), urisrc->src);
+      gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (urisrc->srcpad), pad);
+      gst_object_unref (pad);
+      gst_element_sync_state_with_parent (urisrc->src);
+    } else {
+      GST_ELEMENT_ERROR (urisrc, CORE, MISSING_PLUGIN,
+          (_("No URI handler implemented for \"%s\"."), urisrc->uri), (NULL));
+    }
+  }
+  GST_OBJECT_UNLOCK (urisrc);
+}
+
+static void
 gst_uri_src_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
   GstUriSrc *urisrc = GST_URI_SRC (object);
 
   switch (prop_id) {
-    case PROP_URI:
+    case PROP_URI:{
+      GThread *thread;
+
       urisrc->uri = g_value_dup_string (value);
+      /* FIXME if we set this fast enough can the order of urisrc get
+       * messed up? */
+      thread =
+          g_thread_new (NULL, (GThreadFunc) gst_uri_src_update_src, urisrc);
+      g_thread_unref (thread);
       break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
   }
 }
+
 
 static void
 gst_uri_src_get_property (GObject * object,

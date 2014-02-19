@@ -48,6 +48,8 @@ struct _GstUriSrc
 
   GstPad *srcpad;
 
+  GstElement *src;
+
   /* <private> */
   gchar *uri;
 };
