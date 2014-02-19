@@ -52,6 +52,8 @@ struct _GstUriSrc
 
   /* <private> */
   gchar *uri;
+  gint64 range_start;
+  gint64 range_end;
 };
 
 struct _GstUriSrcClass
