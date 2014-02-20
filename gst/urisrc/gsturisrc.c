@@ -146,14 +146,19 @@ static void
 gst_uri_src_update_src (GstUriSrc * urisrc)
 {
   if (urisrc->src) {
-    gchar *old_protocol, *new_protocol;
+    gchar *old_protocol = NULL, *new_protocol = NULL;
     gchar *old_uri;
 
     old_uri = gst_uri_handler_get_uri (GST_URI_HANDLER (urisrc->src));
-    old_protocol = gst_uri_get_protocol (old_uri);
-    new_protocol = gst_uri_get_protocol (urisrc->uri);
+    if (old_uri) {
+      old_protocol = gst_uri_get_protocol (old_uri);
+    }
+    if (urisrc->uri) {
+      new_protocol = gst_uri_get_protocol (urisrc->uri);
+    }
 
-    if (!g_str_equal (old_protocol, new_protocol)) {
+    if (old_uri == NULL || urisrc->uri == NULL
+        || !g_str_equal (old_protocol, new_protocol)) {
       gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (urisrc->srcpad), NULL);
       gst_element_set_state (urisrc->src, GST_STATE_NULL);
       gst_bin_remove (GST_BIN_CAST (urisrc), urisrc->src);
