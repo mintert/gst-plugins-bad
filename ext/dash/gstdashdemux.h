@@ -57,6 +57,13 @@ struct _GstDashDemuxStream
 {
   GstPad *pad;
 
+  /* floating and linked to the urisrc to allow
+   * us have a decent chain function and event function
+   * a) we want to modify buffers
+   * b) we want to know the flow return when pushing
+   */
+  GstPad *sinkpad;
+
   GstDashDemux *demux;
 
   gint index;
@@ -73,12 +80,14 @@ struct _GstDashDemuxStream
   gboolean stream_eos;
   gboolean need_header;
 
+  GstElement *urisrc;
+  GstMediaFragmentInfo current_fragment;
+  enum {NO_FRAGMENT, FRAGMENT_STATUS_HEADER, FRAGMENT_STATUS_HEADER_INDEX,
+        FRAGMENT_STATUS_MEDIA_INDEX, FRAGMENT_STATUS_MEDIA} fragment_status;
+
   /* Download task */
   GMutex download_mutex;
   GCond download_cond;
-  GstTask *download_task;
-  GRecMutex download_task_lock;
-  GstUriDownloader *downloader;
 
   GstDownloadRate dnl_rate;
 };
@@ -90,7 +99,7 @@ struct _GstDashDemuxStream
  */
 struct _GstDashDemux
 {
-  GstElement parent;
+  GstBin parent;
   GstPad *sinkpad;
 
   gboolean have_group_id;
@@ -123,7 +132,7 @@ struct _GstDashDemux
 
 struct _GstDashDemuxClass
 {
-  GstElementClass parent_class;
+  GstBinClass parent_class;
 };
 
 GType gst_dash_demux_get_type (void);
