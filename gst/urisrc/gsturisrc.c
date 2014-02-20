@@ -145,7 +145,6 @@ gst_uri_src_configure_range (GstUriSrc * urisrc)
 static void
 gst_uri_src_update_src (GstUriSrc * urisrc)
 {
-  GST_OBJECT_LOCK (urisrc);
   if (urisrc->src) {
     gchar *old_protocol, *new_protocol;
     gchar *old_uri;
@@ -179,7 +178,7 @@ gst_uri_src_update_src (GstUriSrc * urisrc)
     g_free (new_protocol);
   }
 
-  if (!urisrc->src) {
+  if (!urisrc->src && urisrc->uri) {
     GST_DEBUG_OBJECT (urisrc, "Creating source element for the URI:%s",
         urisrc->uri);
     urisrc->src =
@@ -191,18 +190,22 @@ gst_uri_src_update_src (GstUriSrc * urisrc)
       gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (urisrc->srcpad), pad);
       gst_object_unref (pad);
 
-      if (GST_STATE (urisrc) >= GST_STATE_READY) {
-        gst_element_set_state (urisrc->src, GST_STATE_READY);
-        gst_uri_src_configure_range (urisrc);
-      }
-
-      gst_element_sync_state_with_parent (urisrc->src);
     } else {
       GST_ELEMENT_ERROR (urisrc, CORE, MISSING_PLUGIN,
           (_("No URI handler implemented for \"%s\"."), urisrc->uri), (NULL));
     }
   }
-  GST_OBJECT_UNLOCK (urisrc);
+
+  if (urisrc->src) {
+    if (GST_STATE (urisrc) >= GST_STATE_READY) {
+      gst_element_set_state (urisrc->src, GST_STATE_READY);
+      gst_uri_src_configure_range (urisrc);
+    }
+
+    GST_DEBUG_OBJECT (urisrc, "Linked element %" GST_PTR_FORMAT ", starting it",
+        urisrc->src);
+    gst_element_sync_state_with_parent (urisrc->src);
+  }
 }
 
 static void
@@ -276,7 +279,8 @@ gst_uri_src_change_state (GstElement * element, GstStateChange trans)
   switch (trans) {
     case GST_STATE_CHANGE_NULL_TO_READY:
       GST_OBJECT_LOCK (urisrc);
-      gst_uri_src_configure_range (urisrc);
+      if (urisrc->src)
+        gst_uri_src_configure_range (urisrc);
       GST_OBJECT_UNLOCK (urisrc);
       break;
     case GST_STATE_CHANGE_READY_TO_NULL:
