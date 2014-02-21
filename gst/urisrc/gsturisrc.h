@@ -54,6 +54,8 @@ struct _GstUriSrc
   gchar *uri;
   gint64 range_start;
   gint64 range_end;
+
+  GMutex mutex;
 };
 
 struct _GstUriSrcClass

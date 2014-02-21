@@ -63,6 +63,9 @@ gst_uri_src_change_state (GstElement * element, GstStateChange trans);
 #define gst_uri_src_parent_class parent_class
 G_DEFINE_TYPE (GstUriSrc, gst_uri_src, GST_TYPE_BIN);
 
+#define GST_URI_SRC_LOCK(u) g_mutex_lock(&u->mutex)
+#define GST_URI_SRC_UNLOCK(u) g_mutex_unlock(&u->mutex)
+
 static void
 gst_uri_src_class_init (GstUriSrcClass * klass)
 {
@@ -113,6 +116,8 @@ gst_uri_src_init (GstUriSrc * urisrc)
   gst_object_unref (tmpl);
 
   gst_element_add_pad (GST_ELEMENT_CAST (urisrc), urisrc->srcpad);
+
+  g_mutex_init (&urisrc->mutex);
 }
 
 static void
@@ -122,6 +127,8 @@ gst_uri_src_finalize (GObject * object)
 
   g_free (src->uri);
   src->uri = NULL;
+
+  g_mutex_clear (&src->mutex);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -145,6 +152,7 @@ gst_uri_src_configure_range (GstUriSrc * urisrc)
 static void
 gst_uri_src_update_src (GstUriSrc * urisrc)
 {
+  GST_URI_SRC_LOCK (urisrc);
   if (urisrc->src) {
     gchar *old_protocol = NULL, *new_protocol = NULL;
     gchar *old_uri;
@@ -159,8 +167,8 @@ gst_uri_src_update_src (GstUriSrc * urisrc)
 
     if (old_uri == NULL || urisrc->uri == NULL
         || !g_str_equal (old_protocol, new_protocol)) {
-      gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (urisrc->srcpad), NULL);
       gst_element_set_state (urisrc->src, GST_STATE_NULL);
+      gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (urisrc->srcpad), NULL);
       gst_bin_remove (GST_BIN_CAST (urisrc), urisrc->src);
       urisrc->src = NULL;
       GST_DEBUG_OBJECT (urisrc, "Can't re-use old source element");
@@ -211,6 +219,7 @@ gst_uri_src_update_src (GstUriSrc * urisrc)
         urisrc->src);
     gst_element_sync_state_with_parent (urisrc->src);
   }
+  GST_URI_SRC_UNLOCK (urisrc);
 }
 
 static void
@@ -223,11 +232,13 @@ gst_uri_src_set_property (GObject * object, guint prop_id,
     case PROP_URI:{
       GThread *thread;
 
+      GST_URI_SRC_LOCK (urisrc);
       urisrc->uri = g_value_dup_string (value);
       /* FIXME if we set this fast enough can the order of urisrc get
        * messed up? */
       thread =
           g_thread_new (NULL, (GThreadFunc) gst_uri_src_update_src, urisrc);
+      GST_URI_SRC_UNLOCK (urisrc);
       g_thread_unref (thread);
       break;
     }
