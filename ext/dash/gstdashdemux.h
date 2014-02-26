@@ -81,6 +81,7 @@ struct _GstDashDemuxStream
   gboolean need_header;
 
   GstElement *urisrc;
+  GstElement *queue;
   GstMediaFragmentInfo current_fragment;
   enum {NO_FRAGMENT, FRAGMENT_STATUS_HEADER, FRAGMENT_STATUS_HEADER_INDEX,
         FRAGMENT_STATUS_MEDIA_INDEX, FRAGMENT_STATUS_MEDIA} fragment_status;
@@ -90,6 +91,8 @@ struct _GstDashDemuxStream
   GCond download_cond;
 
   GstDownloadRate dnl_rate;
+  guint64 total_bytes;
+  GTimeVal download_start_time;
 };
 
 /**

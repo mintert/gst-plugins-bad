@@ -233,6 +233,11 @@ static GstPad *gst_dash_demux_create_pad (GstDashDemux * demux,
 static gboolean gst_dash_demux_stream_download_fragment (GstDashDemux * demux,
     GstDashDemuxStream * stream);
 
+static GstPadProbeReturn urisrc_pad_buffer_probe (GstPad * pad,
+    GstPadProbeInfo * info, gpointer user_data);
+static GstPadProbeReturn urisrc_pad_event_probe (GstPad * pad,
+    GstPadProbeInfo * info, gpointer user_data);
+
 #define gst_dash_demux_parent_class parent_class
 G_DEFINE_TYPE_WITH_CODE (GstDashDemux, gst_dash_demux, GST_TYPE_BIN,
     GST_DEBUG_CATEGORY_INIT (gst_dash_demux_debug, "dashdemux", 0,
@@ -657,6 +662,29 @@ gst_dash_demux_setup_all_streams (GstDashDemux * demux)
     gst_element_sync_state_with_parent (stream->urisrc);
     stream->fragment_status = NO_FRAGMENT;
 
+    /*
+     * In order to have uninterruped download of a single fragment we
+     * use an infinite queue to store all buffers. This is done to
+     * be able to properly measure the download rate for a fragment.
+     * If the buffers are downloaded and pushed directly they might
+     * get blocked downstream and disrupt the download rate math.
+     *
+     * Having an infinite queue is never a good idea, but for now
+     * I can't think of a better option and we wait for a full fragment
+     * to be downloaded and pushed before starting another one so the
+     * queue will at maximum have a single fragment
+     *
+     * TODO find an alternative to a infinite queue
+     */
+    stream->queue = gst_element_factory_make ("queue", NULL);
+    g_object_set (stream->queue, "max-size-bytes", (guint64) 0,
+        "max-size-time", (guint64) 0, "max-size-buffers", (guint64) 0, NULL);
+    gst_bin_add (GST_BIN_CAST (demux), gst_object_ref (stream->queue));
+    if (!gst_element_link (stream->urisrc, stream->queue)) {
+      /* TODO error out */
+    }
+    gst_element_sync_state_with_parent (stream->queue);
+
     stream->index = i;
     stream->input_caps = caps;
     stream->need_header = TRUE;
@@ -667,6 +695,18 @@ gst_dash_demux_setup_all_streams (GstDashDemux * demux)
     GST_LOG_OBJECT (demux, "Creating stream %d %" GST_PTR_FORMAT, i, caps);
     streams = g_slist_prepend (streams, stream);
     stream->pad = gst_dash_demux_create_pad (demux, stream);
+
+    /* add probe to measure download rate */
+    {
+      GstPad *urisrc_pad = gst_element_get_static_pad (stream->urisrc, "src");
+
+      gst_pad_add_probe (urisrc_pad, GST_PAD_PROBE_TYPE_BUFFER,
+          urisrc_pad_buffer_probe, stream, NULL);
+      gst_pad_add_probe (urisrc_pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM,
+          urisrc_pad_event_probe, stream, NULL);
+
+      gst_object_unref (urisrc_pad);
+    }
 
     stream_id =
         gst_pad_create_stream_id_printf (stream->pad,
@@ -987,6 +1027,69 @@ gst_dash_demux_stop (GstDashDemux * demux)
   }
 }
 
+static void
+gst_dash_demux_stream_reset_download_rate_info (GstDashDemuxStream * stream)
+{
+  stream->total_bytes = 0;
+  g_get_current_time (&stream->download_start_time);
+}
+
+static void
+gst_dash_demux_stream_compute_fragment_download_rate (GstDashDemuxStream *
+    stream)
+{
+  GTimeVal now;
+  guint64 diff;
+
+  g_get_current_time (&now);
+  diff =
+      (GST_TIMEVAL_TO_TIME (now) -
+      GST_TIMEVAL_TO_TIME (stream->download_start_time));
+
+  if (stream->total_bytes > 0 && diff > 0) {
+#ifndef GST_DISABLE_GST_DEBUG
+    guint64 brate;
+#endif
+
+    gst_download_rate_add_rate (&stream->dnl_rate, stream->total_bytes, diff);
+
+#ifndef GST_DISABLE_GST_DEBUG
+    brate = (stream->total_bytes * 8) / ((double) diff / GST_SECOND);
+#endif
+    GST_DEBUG_OBJECT (stream->demux,
+        "Stream: %d Download rate = %" G_GUINT64_FORMAT " Kbits/s (%"
+        G_GUINT64_FORMAT " Ko in %.2f s)", stream->index, brate / 1000,
+        stream->total_bytes / 1024, ((double) diff / GST_SECOND));
+  }
+}
+
+static GstPadProbeReturn
+urisrc_pad_buffer_probe (GstPad * pad, GstPadProbeInfo * info,
+    gpointer user_data)
+{
+  GstBuffer *buffer = info->data;
+  GstDashDemuxStream *stream = user_data;
+
+  stream->total_bytes += gst_buffer_get_size (buffer);
+
+  return GST_PAD_PROBE_OK;
+}
+
+static GstPadProbeReturn
+urisrc_pad_event_probe (GstPad * pad, GstPadProbeInfo * info,
+    gpointer user_data)
+{
+  GstEvent *event = info->data;
+  GstDashDemuxStream *stream = user_data;
+
+  if (GST_EVENT_TYPE (event) == GST_EVENT_EOS) {
+    /* fragment finished, now add the bytes/time to statistics */
+    gst_dash_demux_stream_compute_fragment_download_rate (stream);
+  }
+
+  return GST_PAD_PROBE_OK;
+}
+
 static GstFlowReturn
 gst_dash_demux_stream_sinkpad_chain (GstPad * pad, GstObject * parent,
     GstBuffer * buffer)
@@ -1083,7 +1186,7 @@ gst_dash_demux_create_pad (GstDashDemux * demux, GstDashDemuxStream * stream)
   GstPad *pad;
   GstPad *target;
 
-  target = gst_element_get_static_pad (stream->urisrc, "src");
+  target = gst_element_get_static_pad (stream->queue, "src");
 
   /* Create and activate new pads */
   pad = gst_pad_new_from_static_template (&srctemplate, NULL);
@@ -1212,6 +1315,12 @@ gst_dash_demux_stream_free (GstDashDemuxStream * stream)
     gst_bin_remove (GST_BIN_CAST (stream->demux), stream->urisrc);
     gst_object_unref (stream->urisrc);
     stream->urisrc = NULL;
+  }
+  if (stream->queue) {
+    gst_element_set_state (stream->queue, GST_STATE_NULL);
+    gst_bin_remove (GST_BIN_CAST (stream->demux), stream->queue);
+    gst_object_unref (stream->queue);
+    stream->queue = NULL;
   }
   g_cond_clear (&stream->download_cond);
   g_mutex_clear (&stream->download_mutex);
@@ -2013,6 +2122,9 @@ gst_dash_demux_stream_download_fragment (GstDashDemux * demux,
     }
   }
 
+  /* starting to download a new piece, reset download info */
+  gst_dash_demux_stream_reset_download_rate_info (stream);
+
   if (uri) {
     g_object_set (stream->urisrc, "range-start", range_start,
         "range-end", range_end, NULL);
@@ -2080,23 +2192,6 @@ gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream,
 
   demux->end_of_period = end_of_period;
 
-#if 0
-  if (stream && buffer_size > 0 && diff > 0) {
-#ifndef GST_DISABLE_GST_DEBUG
-    guint64 brate;
-#endif
-
-    gst_download_rate_add_rate (&stream->dnl_rate, buffer_size, diff);
-
-#ifndef GST_DISABLE_GST_DEBUG
-    brate = (buffer_size * 8) / ((double) diff / GST_SECOND);
-#endif
-    GST_INFO_OBJECT (demux,
-        "Stream: %d Download rate = %" G_GUINT64_FORMAT " Kbits/s (%"
-        G_GUINT64_FORMAT " Ko in %.2f s)", stream->index, brate / 1000,
-        buffer_size / 1024, ((double) diff / GST_SECOND));
-  }
-#endif
   return ret;
 }
 
