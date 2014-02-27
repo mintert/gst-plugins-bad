@@ -196,6 +196,9 @@ static void gst_dash_demux_dispose (GObject * obj);
 static GstStateChangeReturn
 gst_dash_demux_change_state (GstElement * element, GstStateChange transition);
 
+/* GstBin */
+static void gst_dash_demux_handle_message (GstBin * bin, GstMessage * message);
+
 /* GstDashDemux */
 static GstFlowReturn gst_dash_demux_pad (GstPad * pad, GstObject * parent,
     GstBuffer * buf);
@@ -265,9 +268,11 @@ gst_dash_demux_class_init (GstDashDemuxClass * klass)
 {
   GObjectClass *gobject_class;
   GstElementClass *gstelement_class;
+  GstBinClass *gstbin_class;
 
   gobject_class = (GObjectClass *) klass;
   gstelement_class = (GstElementClass *) klass;
+  gstbin_class = (GstBinClass *) klass;
 
   gobject_class->set_property = gst_dash_demux_set_property;
   gobject_class->get_property = gst_dash_demux_get_property;
@@ -308,6 +313,9 @@ gst_dash_demux_class_init (GstDashDemuxClass * klass)
       "David Corvoysier <david.corvoysier@orange.com>\n\
                 Hamid Zakari <hamid.zakari@gmail.com>\n\
                 Gianluca Gennari <gennarone@gmail.com>");
+
+  gstbin_class->handle_message =
+      GST_DEBUG_FUNCPTR (gst_dash_demux_handle_message);
 }
 
 static void
@@ -404,6 +412,114 @@ gst_dash_demux_change_state (GstElement * element, GstStateChange transition)
       break;
   }
   return ret;
+}
+
+static gboolean
+gst_dash_demux_handle_stream_download_error (GstDashDemuxStream * stream)
+{
+  gboolean ret = FALSE;
+  GstDashDemux *demux = stream->demux;
+
+  /* Download failed 'by itself'
+   * in case this is live, we might be ahead or before playback, where
+   * segments don't exist (are still being created or were already deleted)
+   * so we either wait or jump ahead */
+  if (gst_mpd_client_is_live (demux->client)) {
+    GstClockTime fragment_ts = stream->current_fragment.timestamp;
+    gint64 time_diff;
+    gint pos;
+
+    pos =
+        gst_mpd_client_check_time_position (demux->client,
+        stream->active_stream, fragment_ts, &time_diff);
+    GST_DEBUG_OBJECT (stream->pad,
+        "Checked position for fragment ts %" GST_TIME_FORMAT
+        ", res: %d, diff: %" G_GINT64_FORMAT, GST_TIME_ARGS (fragment_ts),
+        pos, time_diff);
+
+    time_diff *= GST_USECOND;
+    if (pos < 0) {
+      /* we're behind, try moving to the 'present' */
+      GDateTime *now = g_date_time_new_now_utc ();
+
+      GST_DEBUG_OBJECT (stream->pad,
+          "Falling behind live stream, moving forward");
+      gst_mpd_client_seek_to_time (demux->client, now);
+      g_date_time_unref (now);
+
+    } else if (pos > 0) {
+      /* we're ahead, wait a little */
+
+      GST_DEBUG_OBJECT (stream->pad, "Waiting for next segment to be created");
+      gst_mpd_client_set_segment_index (stream->active_stream,
+          stream->active_stream->segment_idx - 1);
+      gst_dash_demux_download_wait (stream, time_diff);
+    } else {
+      gst_mpd_client_set_segment_index (stream->active_stream,
+          stream->active_stream->segment_idx - 1);
+      demux->client->update_failed_count++;
+    }
+  } else {
+    demux->client->update_failed_count++;
+  }
+
+  if (demux->client->update_failed_count < DEFAULT_FAILED_COUNT) {
+    gchar *uri;
+
+    GST_WARNING_OBJECT (stream->pad, "Could not fetch the next fragment");
+
+    /* re-set the uri to start again */
+    g_object_get (stream->urisrc, "uri", &uri, NULL);
+    g_object_set (stream->urisrc, "uri", uri, NULL);
+
+  } else {
+    /* post our own message first */
+    GST_ELEMENT_ERROR (demux, RESOURCE, NOT_FOUND,
+        ("Could not download fragment"), (NULL));
+    g_object_set (stream->urisrc, "range-start", (gint64) - 1,
+        "range-end", (gint64) - 1, "uri", NULL, NULL);
+    ret = TRUE;
+  }
+
+  return ret;
+}
+
+static void
+gst_dash_demux_handle_message (GstBin * bin, GstMessage * message)
+{
+  GstDashDemux *demux = GST_DASH_DEMUX_CAST (bin);
+
+  switch (GST_MESSAGE_TYPE (message)) {
+    case GST_MESSAGE_ERROR:{
+      GSList *iter;
+      GstObject *source = GST_MESSAGE_SRC (message);
+      GstObject *src_parent = gst_object_get_parent (source);
+
+      if (src_parent) {
+        for (iter = demux->streams; iter; iter = g_slist_next (iter)) {
+          GstDashDemuxStream *stream = iter->data;
+
+          if (src_parent == (GstObject *) stream->urisrc) {
+            /* TODO might not be a download error, but we handle everything
+             * as if it was. How to detect different error types from HTTP? */
+            if (!gst_dash_demux_handle_stream_download_error (stream)) {
+              gst_message_unref (message);
+              message = NULL;
+
+              gst_dash_demux_stream_download_loop (stream);
+            }
+            break;
+          }
+        }
+        gst_object_unref (src_parent);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  if (message)
+    GST_BIN_CLASS (parent_class)->handle_message (bin, message);
 }
 
 static gboolean
@@ -1083,6 +1199,9 @@ urisrc_pad_event_probe (GstPad * pad, GstPadProbeInfo * info,
   GstDashDemuxStream *stream = user_data;
 
   if (GST_EVENT_TYPE (event) == GST_EVENT_EOS) {
+    /* downloaded a fragment without error, reset error count */
+    stream->demux->client->update_failed_count = 0;
+
     /* fragment finished, now add the bytes/time to statistics */
     gst_dash_demux_stream_compute_fragment_download_rate (stream);
   }
@@ -1590,7 +1709,6 @@ gst_dash_demux_stream_download_loop (GstDashDemuxStream * stream)
 
   GST_LOG_OBJECT (stream->pad, "Starting download loop");
 
-retry:
   if (demux->cancelled) {
     goto cancelled;
   }
@@ -1672,62 +1790,11 @@ retry:
           "range-end", (gint64) - 1, "uri", NULL, NULL);
       break;
     case GST_FLOW_ERROR:
-      /* Download failed 'by itself'
-       * in case this is live, we might be ahead or before playback, where
-       * segments don't exist (are still being created or were already deleted)
-       * so we either wait or jump ahead */
-      if (gst_mpd_client_is_live (demux->client)) {
-        gint64 time_diff;
-        gint pos;
-
-        pos =
-            gst_mpd_client_check_time_position (demux->client,
-            stream->active_stream, fragment_ts, &time_diff);
-        GST_DEBUG_OBJECT (stream->pad,
-            "Checked position for fragment ts %" GST_TIME_FORMAT
-            ", res: %d, diff: %" G_GINT64_FORMAT, GST_TIME_ARGS (fragment_ts),
-            pos, time_diff);
-
-        time_diff *= GST_USECOND;
-        if (pos < 0) {
-          /* we're behind, try moving to the 'present' */
-          GDateTime *now = g_date_time_new_now_utc ();
-
-          GST_DEBUG_OBJECT (stream->pad,
-              "Falling behind live stream, moving forward");
-          gst_mpd_client_seek_to_time (demux->client, now);
-          g_date_time_unref (now);
-
-        } else if (pos > 0) {
-          /* we're ahead, wait a little */
-
-          GST_DEBUG_OBJECT (stream->pad,
-              "Waiting for next segment to be created");
-          gst_mpd_client_set_segment_index (stream->active_stream,
-              stream->active_stream->segment_idx - 1);
-          gst_dash_demux_download_wait (stream, time_diff);
-        } else {
-          gst_mpd_client_set_segment_index (stream->active_stream,
-              stream->active_stream->segment_idx - 1);
-          demux->client->update_failed_count++;
-        }
-      } else {
-        demux->client->update_failed_count++;
-      }
-
-      if (demux->client->update_failed_count < DEFAULT_FAILED_COUNT) {
-        GST_WARNING_OBJECT (stream->pad, "Could not fetch the next fragment");
-        goto retry;
-      } else {
-        goto error_downloading;
-      }
-      break;
+      g_assert_not_reached ();
+      goto error_scheduling_download;
     default:
       break;
   }
-
-  if (G_LIKELY (stream->last_ret != GST_FLOW_ERROR))
-    demux->client->update_failed_count = 0;
 
   GST_DEBUG_OBJECT (stream->pad, "Finishing download loop");
   return flow_ret;
@@ -1747,12 +1814,13 @@ end_of_manifest:
     return GST_FLOW_EOS;
   }
 
-error_downloading:
+error_scheduling_download:
   {
     GST_ELEMENT_ERROR (demux, RESOURCE, NOT_FOUND,
-        ("Could not fetch the next fragment, leaving download task"), (NULL));
-    g_object_set (stream->urisrc, "range-start", (gint64) - 1,
-        "range-end", (gint64) - 1, "uri", NULL, NULL);
+        ("Could not schedule the next download, leaving download task"),
+        (NULL));
+    g_object_set (stream->urisrc, "range-start", (gint64) - 1, "range-end",
+        (gint64) - 1, "uri", NULL, NULL);
 
     return GST_FLOW_ERROR;
   }
