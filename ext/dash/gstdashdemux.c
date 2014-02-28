@@ -678,7 +678,7 @@ gst_dash_demux_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
             stream->last_ret = GST_FLOW_OK;
             stream->restart_download = TRUE;
             stream->need_header = TRUE;
-            GST_DEBUG_OBJECT (stream->pad, "Restarting download loop");
+            GST_DEBUG_OBJECT (stream->pad, "Restarting download");
             gst_dash_demux_stream_download_loop (stream);
           }
           GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
@@ -1221,6 +1221,7 @@ gst_dash_demux_stream_sinkpad_chain (GstPad * pad, GstObject * parent,
   GstDashDemuxStream *stream = gst_pad_get_element_private (pad);
   GstDashDemux *demux = stream->demux;
   GstClockTime timestamp, duration;
+  GstFlowReturn ret;
 
   buffer = gst_buffer_make_writable (buffer);
   timestamp = stream->current_fragment.timestamp;
@@ -1256,7 +1257,15 @@ gst_dash_demux_stream_sinkpad_chain (GstPad * pad, GstObject * parent,
   if (GST_CLOCK_TIME_IS_VALID (duration))
     stream->position += duration;
 
-  return gst_pad_push (stream->pad, buffer);
+  ret = stream->last_ret = gst_pad_push (stream->pad, buffer);
+  if (ret == GST_FLOW_NOT_LINKED) {
+    /* stop this stream, it isn't being used */
+    g_object_set (stream->urisrc, "uri", NULL, NULL);
+
+    /* urisrc doesn't need to know or it will error out */
+    ret = GST_FLOW_OK;
+  }
+  return ret;
 }
 
 static gboolean
