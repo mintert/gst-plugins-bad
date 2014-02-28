@@ -218,8 +218,7 @@ static GstEvent
     * gst_dash_demux_stream_select_representation_unlocked (GstDashDemuxStream *
     stream);
 static GstFlowReturn
-gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream,
-    GstClockTime * ts);
+gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream);
 static gboolean gst_dash_demux_advance_period (GstDashDemux * demux);
 static void gst_dash_demux_download_wait (GstDashDemuxStream * stream,
     GstClockTime time_diff);
@@ -797,7 +796,10 @@ gst_dash_demux_setup_all_streams (GstDashDemux * demux)
         "max-size-time", (guint64) 0, "max-size-buffers", (guint64) 0, NULL);
     gst_bin_add (GST_BIN_CAST (demux), gst_object_ref (stream->queue));
     if (!gst_element_link (stream->urisrc, stream->queue)) {
-      /* TODO error out */
+      /* queue has ANY pads, this should not happen */
+      GST_ELEMENT_ERROR (demux, STREAM, DEMUX,
+          ("Failed to setup internal elements"),
+          ("Could not link urisrc with queue"));
     }
     gst_element_sync_state_with_parent (stream->queue);
 
@@ -1704,7 +1706,6 @@ gst_dash_demux_stream_download_loop (GstDashDemuxStream * stream)
 {
   GstDashDemux *demux = stream->demux;
   GstFlowReturn flow_ret = GST_FLOW_OK;
-  GstClockTime fragment_ts = GST_CLOCK_TIME_NONE;
   GstEvent *caps_event;
 
   GST_LOG_OBJECT (stream->pad, "Starting download loop");
@@ -1732,8 +1733,7 @@ gst_dash_demux_stream_download_loop (GstDashDemuxStream * stream)
   }
 
   /* fetch the next fragment */
-  flow_ret =
-      gst_dash_demux_stream_schedule_next_fragment (stream, &fragment_ts);
+  flow_ret = gst_dash_demux_stream_schedule_next_fragment (stream);
 
   if (demux->cancelled) {
     goto cancelled;
@@ -1810,7 +1810,6 @@ end_of_manifest:
     GST_INFO_OBJECT (stream->pad, "End of manifest, leaving download task");
     g_object_set (stream->urisrc, "range-start", (gint64) - 1,
         "range-end", (gint64) - 1, "uri", NULL, NULL);
-    /* TODO should push eos? */
     return GST_FLOW_EOS;
   }
 
@@ -2040,7 +2039,7 @@ gst_dash_demux_wait_for_fragment_to_be_available (GstDashDemux * demux,
 }
 
 static GstFlowReturn
-gst_dash_demux_stream_download_fragment (GstDashDemux * demux,
+gst_dash_demux_stream_start_fragment_download (GstDashDemux * demux,
     GstDashDemuxStream * stream)
 {
   guint stream_idx = stream->index;
@@ -2205,16 +2204,13 @@ gst_dash_demux_stream_download_fragment (GstDashDemux * demux,
 /* gst_dash_demux_stream_schedule_next_fragment:
  *
  * Get the next fragments for the stream with the earlier timestamp.
- * It returns the selected timestamp so the caller can deal with
- * sync issues in case the stream is live.
  * 
  * This function uses the generic URI downloader API.
  *
  * Returns FALSE if an error occured while downloading fragments
  */
 static GstFlowReturn
-gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream,
-    GstClockTime * ts)
+gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream)
 {
   gboolean end_of_period = TRUE;
   GstDashDemux *demux = stream->demux;
@@ -2230,7 +2226,7 @@ gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream,
   }
 
   if (!gst_mpd_client_get_next_fragment_timestamp (demux->client,
-          stream->index, ts)) {
+          stream->index, NULL)) {
     GST_INFO_OBJECT (demux,
         "This Period doesn't contain more fragments for stream %u",
         stream->index);
@@ -2255,7 +2251,7 @@ gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream,
   }
 
   /* Get the fragment corresponding to each stream index */
-  ret = gst_dash_demux_stream_download_fragment (demux, stream);
+  ret = gst_dash_demux_stream_start_fragment_download (demux, stream);
   end_of_period = ret == GST_FLOW_EOS;
 
   demux->end_of_period = end_of_period;

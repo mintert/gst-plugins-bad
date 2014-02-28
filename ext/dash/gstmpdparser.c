@@ -3576,7 +3576,8 @@ gst_mpd_client_get_next_fragment_timestamp (GstMpdClient * client,
     return FALSE;
   }
 
-  *ts = currentChunk.start_time;
+  if (ts)
+    *ts = currentChunk.start_time;
   GST_MPD_CLIENT_UNLOCK (client);
 
   return TRUE;
