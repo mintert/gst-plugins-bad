@@ -152,6 +152,12 @@ gst_uri_src_configure_range (GstUriSrc * urisrc)
 static void
 gst_uri_src_update_src (GstUriSrc * urisrc)
 {
+  gchar *new_uri;
+
+  GST_OBJECT_LOCK (urisrc);
+  new_uri = urisrc->uri ? g_strdup (urisrc->uri) : NULL;
+  GST_OBJECT_UNLOCK (urisrc);
+
   GST_URI_SRC_LOCK (urisrc);
   if (urisrc->src) {
     gchar *old_protocol = NULL, *new_protocol = NULL;
@@ -161,11 +167,11 @@ gst_uri_src_update_src (GstUriSrc * urisrc)
     if (old_uri) {
       old_protocol = gst_uri_get_protocol (old_uri);
     }
-    if (urisrc->uri) {
-      new_protocol = gst_uri_get_protocol (urisrc->uri);
+    if (new_uri) {
+      new_protocol = gst_uri_get_protocol (new_uri);
     }
 
-    if (old_uri == NULL || urisrc->uri == NULL
+    if (old_uri == NULL || new_uri == NULL
         || !g_str_equal (old_protocol, new_protocol)) {
       gst_element_set_state (urisrc->src, GST_STATE_NULL);
       gst_ghost_pad_set_target (GST_GHOST_PAD_CAST (urisrc->srcpad), NULL);
@@ -177,7 +183,7 @@ gst_uri_src_update_src (GstUriSrc * urisrc)
 
       GST_DEBUG_OBJECT (urisrc, "Re-using old source element");
       if (!gst_uri_handler_set_uri (GST_URI_HANDLER (urisrc->src),
-              urisrc->uri, &err)) {
+              new_uri, &err)) {
         GST_DEBUG_OBJECT (urisrc, "Failed to re-use old source element: %s",
             err->message);
         g_clear_error (&err);
@@ -191,11 +197,10 @@ gst_uri_src_update_src (GstUriSrc * urisrc)
     g_free (new_protocol);
   }
 
-  if (!urisrc->src && urisrc->uri) {
+  if (!urisrc->src && new_uri) {
     GST_DEBUG_OBJECT (urisrc, "Creating source element for the URI:%s",
         urisrc->uri);
-    urisrc->src =
-        gst_element_make_from_uri (GST_URI_SRC, urisrc->uri, NULL, NULL);
+    urisrc->src = gst_element_make_from_uri (GST_URI_SRC, new_uri, NULL, NULL);
     if (urisrc->src) {
       GstPad *pad = gst_element_get_static_pad (urisrc->src, "src");
 
@@ -205,7 +210,7 @@ gst_uri_src_update_src (GstUriSrc * urisrc)
 
     } else {
       GST_ELEMENT_ERROR (urisrc, CORE, MISSING_PLUGIN,
-          (_("No URI handler implemented for \"%s\"."), urisrc->uri), (NULL));
+          (_("No URI handler implemented for \"%s\"."), new_uri), (NULL));
     }
   }
 
@@ -220,6 +225,8 @@ gst_uri_src_update_src (GstUriSrc * urisrc)
     gst_element_sync_state_with_parent (urisrc->src);
   }
   GST_URI_SRC_UNLOCK (urisrc);
+
+  g_free (new_uri);
 }
 
 static void
@@ -232,13 +239,14 @@ gst_uri_src_set_property (GObject * object, guint prop_id,
     case PROP_URI:{
       GThread *thread;
 
-      GST_URI_SRC_LOCK (urisrc);
+      GST_OBJECT_LOCK (urisrc);
+      g_free (urisrc->uri);
       urisrc->uri = g_value_dup_string (value);
+      GST_OBJECT_UNLOCK (urisrc);
       /* FIXME if we set this fast enough can the order of urisrc get
        * messed up? */
       thread =
           g_thread_new (NULL, (GThreadFunc) gst_uri_src_update_src, urisrc);
-      GST_URI_SRC_UNLOCK (urisrc);
       g_thread_unref (thread);
       break;
     }
