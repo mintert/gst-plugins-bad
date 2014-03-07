@@ -219,7 +219,9 @@ static GstEvent
     stream);
 static GstFlowReturn
 gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream);
-static gboolean gst_dash_demux_advance_period (GstDashDemux * demux);
+static gboolean gst_dash_demux_advance_period (GstDashDemux * demux,
+    gboolean create_segment_events);
+static void gst_dash_demux_create_segment_events (GstDashDemux * demux);
 static void gst_dash_demux_download_wait (GstDashDemuxStream * stream,
     GstClockTime time_diff);
 
@@ -933,7 +935,7 @@ gst_dash_demux_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
         goto seek_quit;
       }
 
-      gst_dash_demux_advance_period (demux);
+      gst_dash_demux_advance_period (demux, FALSE);
 
       /* If stream is live, try to find the segment that is closest to current time */
       if (gst_mpd_client_is_live (demux->client)) {
@@ -977,6 +979,7 @@ gst_dash_demux_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
         /* start playing from the first segment */
         gst_mpd_client_set_segment_index_for_all_streams (demux->client, 0);
       }
+      gst_dash_demux_create_segment_events (demux);
 
       /* Send duration message */
       if (!gst_mpd_client_is_live (demux->client)) {
@@ -1371,12 +1374,39 @@ gst_dash_demux_remove_streams (GstDashDemux * demux, GSList * streams)
   g_slist_free (streams);
 }
 
-static gboolean
-gst_dash_demux_advance_period (GstDashDemux * demux)
+static void
+gst_dash_demux_create_segment_events (GstDashDemux * demux)
 {
-  GSList *old_period = NULL;
+  GstClockTime lower_ts;
   GSList *iter;
   GstEvent *seg_evt;
+
+  lower_ts = GST_CLOCK_TIME_NONE;
+  for (iter = demux->streams; iter; iter = g_slist_next (iter)) {
+    GstDashDemuxStream *stream = iter->data;
+    GstClockTime stream_time;
+
+    if (gst_mpd_client_get_next_fragment_timestamp (demux->client,
+            stream->index, &stream_time)) {
+      if (!GST_CLOCK_TIME_IS_VALID (lower_ts) || stream_time < lower_ts)
+        lower_ts = stream_time;
+    }
+  }
+  demux->segment.start = lower_ts;
+  seg_evt = gst_event_new_segment (&demux->segment);
+  for (iter = demux->streams; iter; iter = g_slist_next (iter)) {
+    GstDashDemuxStream *stream = iter->data;
+
+    gst_event_replace (&stream->pending_segment, seg_evt);
+  }
+  gst_event_unref (seg_evt);
+}
+
+static gboolean
+gst_dash_demux_advance_period (GstDashDemux * demux,
+    gboolean update_segment_events)
+{
+  GSList *old_period = NULL;
 
   GST_DEBUG_OBJECT (demux, "Advancing period from %p", demux->streams);
 
@@ -1403,13 +1433,8 @@ gst_dash_demux_advance_period (GstDashDemux * demux)
   /* TODO protect with lock, using the client lock isn't useful
    * because causes deadlocks with the event_src handler */
   gst_dash_demux_expose_streams (demux);
-  seg_evt = gst_event_new_segment (&demux->segment);
-  for (iter = demux->streams; iter; iter = g_slist_next (iter)) {
-    GstDashDemuxStream *stream = iter->data;
-
-    gst_event_replace (&stream->pending_segment, seg_evt);
-  }
-  gst_event_unref (seg_evt);
+  if (update_segment_events)
+    gst_dash_demux_create_segment_events (demux);
   gst_dash_demux_remove_streams (demux, old_period);
 
   GST_DASH_DEMUX_CLIENT_LOCK (demux);
@@ -1777,7 +1802,7 @@ gst_dash_demux_stream_download_loop (GstDashDemuxStream * stream)
           /* start playing from the first segment of the new period */
           gst_mpd_client_set_segment_index_for_all_streams (demux->client, 0);
 
-          gst_dash_demux_advance_period (demux);
+          gst_dash_demux_advance_period (demux, TRUE);
 
           gst_dash_demux_resume_download_task (demux);
           GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
