@@ -1299,7 +1299,9 @@ gst_dash_demux_refresh_mpd (GstDashDemux * demux)
           /* update the streams to play from the next segment */
           for (iter = demux->streams; iter; iter = g_slist_next (iter)) {
             GstDashDemuxStream *demux_stream = iter->data;
-            GstActiveStream *new_stream = demux_stream->active_stream;
+            GstActiveStream *new_stream =
+                gst_mpdparser_get_active_stream_by_index (new_client,
+                demux_stream->index);
             GstClockTime ts;
 
             if (!new_stream) {
@@ -1308,6 +1310,8 @@ gst_dash_demux_refresh_mpd (GstDashDemux * demux)
                   demux_stream->index);
               return GST_FLOW_EOS;
             }
+
+            demux_stream->active_stream = new_stream;
 
             if (gst_mpd_client_get_next_fragment_timestamp (demux->client,
                     demux_stream->index, &ts)) {
