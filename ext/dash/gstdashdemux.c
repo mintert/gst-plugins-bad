@@ -1742,6 +1742,7 @@ gst_dash_demux_stream_download_loop (GstDashDemuxStream * stream)
   GstFlowReturn flow_ret = GST_FLOW_OK;
   GstEvent *caps_event;
 
+retry:
   GST_LOG_OBJECT (stream->pad, "Starting download loop");
 
   if (demux->cancelled) {
@@ -1777,6 +1778,13 @@ gst_dash_demux_stream_download_loop (GstDashDemuxStream * stream)
   switch (flow_ret) {
     case GST_FLOW_OK:
       break;
+    case GST_FLOW_CUSTOM_SUCCESS:{
+      gint64 update_period = demux->client->mpd_node->minimumUpdatePeriod;
+      /* live streaming needs to wait for the next fragment */
+      gst_dash_demux_download_wait (stream, update_period);
+      goto retry;
+      break;
+    }
     case GST_FLOW_NOT_LINKED:
       g_object_set (stream->urisrc, "range-start", (gint64) - 1,
           "range-end", (gint64) - 1, "uri", NULL, NULL);
@@ -2269,7 +2277,7 @@ gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream)
     if (gst_mpd_client_is_live (demux->client)
         && demux->client->mpd_node->minimumUpdatePeriod != -1) {
       end_of_period = FALSE;
-      return GST_FLOW_OK;       /* TODO wait */
+      return GST_FLOW_CUSTOM_SUCCESS;   /* TODO wait */
     }
     return GST_FLOW_EOS;
   }
