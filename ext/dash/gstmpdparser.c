@@ -3482,6 +3482,8 @@ gst_mpd_client_get_segment_index_at_time (GstMpdClient * client,
   GstDateTime *avail_start =
       gst_mpd_client_get_availability_start_time (client);
   GstStreamPeriod *stream_period = gst_mpdparser_get_stream_period (client);
+  gint seg_idx = 0;
+  guint total_count;
 
   if (avail_start == NULL)
     return -1;
@@ -3501,7 +3503,12 @@ gst_mpd_client_get_segment_index_at_time (GstMpdClient * client,
   seg_duration = gst_mpd_client_get_next_fragment_duration (client, stream);
   if (seg_duration == 0)
     return -1;
-  return diff / seg_duration;
+  seg_idx = diff / seg_duration;
+  total_count = gst_mpd_client_get_segments_counts (stream);
+  if (total_count && seg_idx >= total_count) {
+    seg_idx = total_count - 1;
+  }
+  return seg_idx;
 }
 
 static GstDateTime *
