@@ -467,7 +467,6 @@ struct _GstMpdClient
 
   GList *active_streams;                      /* list of GstActiveStream */
 
-  guint update_failed_count;
   gchar *mpd_uri;                             /* manifest file URI */
   GMutex lock;
 };

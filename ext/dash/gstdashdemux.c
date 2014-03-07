@@ -458,13 +458,23 @@ gst_dash_demux_handle_stream_download_error (GstDashDemuxStream * stream)
     } else {
       gst_mpd_client_set_segment_index (stream->active_stream,
           stream->active_stream->segment_idx - 1);
-      demux->client->update_failed_count++;
+      stream->failed_count++;
     }
   } else {
-    demux->client->update_failed_count++;
+    stream->failed_count++;
+    if (stream->failed_count == DEFAULT_FAILED_COUNT - 1) {
+      /* this is a on-demand dash stream, skip this fragment and move on to
+       * the next one, might just be a missing fragment on the server.
+       * It is also possible that the fragment really doesn't exist when mpds
+       * have wrong total duration */
+      if (gst_dash_demux_stream_download_loop (stream) == GST_FLOW_EOS) {
+        gst_pad_push_event (stream->pad, gst_event_new_eos ());
+        return ret;
+      }
+    }
   }
 
-  if (demux->client->update_failed_count < DEFAULT_FAILED_COUNT) {
+  if (stream->failed_count < DEFAULT_FAILED_COUNT) {
     gchar *uri;
 
     GST_WARNING_OBJECT (stream->pad, "Could not fetch the next fragment");
@@ -1205,7 +1215,7 @@ urisrc_pad_event_probe (GstPad * pad, GstPadProbeInfo * info,
 
   if (GST_EVENT_TYPE (event) == GST_EVENT_EOS) {
     /* downloaded a fragment without error, reset error count */
-    stream->demux->client->update_failed_count = 0;
+    stream->failed_count = 0;
 
     /* fragment finished, now add the bytes/time to statistics */
     gst_dash_demux_stream_compute_fragment_download_rate (stream);

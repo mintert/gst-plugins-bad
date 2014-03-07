@@ -87,6 +87,8 @@ struct _GstDashDemuxStream
   enum {NO_FRAGMENT, FRAGMENT_STATUS_HEADER, FRAGMENT_STATUS_HEADER_INDEX,
         FRAGMENT_STATUS_MEDIA_INDEX, FRAGMENT_STATUS_MEDIA} fragment_status;
 
+  gint failed_count;
+
   /* Download task */
   GMutex download_mutex;
   GCond download_cond;
