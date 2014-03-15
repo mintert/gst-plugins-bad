@@ -1711,7 +1711,9 @@ gst_dash_demux_refresh_mpd (GstDashDemux * demux)
                 if (gst_mpd_client_get_last_fragment_timestamp (demux->client,
                     demux_stream->index, &ts)) {
               /* try to set to the old timestamp + 1 */
-              gst_mpd_client_stream_seek (new_client, new_stream, ts + 1);
+              gst_mpd_client_stream_seek (new_client, new_stream, ts);
+              gst_mpd_client_set_segment_index (new_stream,
+                  gst_mpd_client_get_segment_index (new_stream) + 1);
             }
           }
 
