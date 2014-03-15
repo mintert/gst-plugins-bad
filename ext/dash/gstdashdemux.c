@@ -234,8 +234,6 @@ static GstCaps *gst_dash_demux_get_input_caps (GstDashDemux * demux,
     GstActiveStream * stream);
 static GstPad *gst_dash_demux_create_pad (GstDashDemux * demux,
     GstDashDemuxStream * stream);
-static gboolean gst_dash_demux_stream_download_fragment (GstDashDemux * demux,
-    GstDashDemuxStream * stream);
 
 static GstPadProbeReturn urisrc_pad_buffer_probe (GstPad * pad,
     GstPadProbeInfo * info, gpointer user_data);
@@ -670,8 +668,8 @@ gst_dash_demux_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
         demux->timestamp_offset = 0;
         gst_uri_downloader_reset (demux->downloader);
         GST_DEBUG_OBJECT (demux, "Resuming tasks after seeking");
-        gst_dash_demux_resume_download_task (demux);
         GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
+        gst_dash_demux_resume_download_task (demux);
       }
 
       return TRUE;
@@ -698,8 +696,7 @@ gst_dash_demux_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
              * that will deadlock */
             thread =
                 g_thread_new (NULL,
-                (GThreadFunc) gst_dash_demux_stream_download_loop_locked,
-                stream);
+                (GThreadFunc) gst_dash_demux_stream_download_loop, stream);
             g_thread_unref (thread);
           }
           GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
@@ -1019,8 +1016,8 @@ gst_dash_demux_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
         }
       }
       demux->timestamp_offset = -1;
-      gst_dash_demux_resume_download_task (demux);
       GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
+      gst_dash_demux_resume_download_task (demux);
 
     seek_quit:
       gst_event_unref (event);
@@ -1140,9 +1137,15 @@ gst_dash_demux_wait_stop (GstDashDemux * demux)
 
   GST_DEBUG_OBJECT (demux, "Waiting for threads to stop");
   for (iter = demux->streams; iter; iter = g_slist_next (iter)) {
-    /* GstDashDemuxStream *stream = iter->data; */
+    GstDashDemuxStream *stream = iter->data;
 
-    /* FIXME how to wait on urisrc? */
+    GST_PAD_STREAM_LOCK (stream->pad);
+    /* grabbing the lock means it is stopped */
+    stream->need_header = TRUE;
+    gst_media_fragment_info_clear (&stream->current_fragment);
+    stream->fragment_status = NO_FRAGMENT;
+    stream->last_ret = GST_FLOW_FLUSHING;
+    GST_PAD_STREAM_UNLOCK (stream->pad);
   }
 }
 
@@ -1160,12 +1163,10 @@ gst_dash_demux_stop (GstDashDemux * demux)
   for (iter = demux->streams; iter; iter = g_slist_next (iter)) {
     GstDashDemuxStream *stream = iter->data;
 
-    stream->last_ret = GST_FLOW_FLUSHING;
-    stream->need_header = TRUE;
     g_object_set (stream->urisrc, "range-start", (gint64) - 1,
         "range-end", (gint64) - 1, "uri", NULL, NULL);
-    gst_media_fragment_info_clear (&stream->current_fragment);
-    stream->fragment_status = NO_FRAGMENT;
+    stream->last_ret = GST_FLOW_FLUSHING;
+    g_cond_signal (&stream->download_cond);
   }
 }
 
@@ -1278,14 +1279,54 @@ gst_dash_demux_stream_sinkpad_chain (GstPad * pad, GstObject * parent,
   if (GST_CLOCK_TIME_IS_VALID (duration))
     stream->position += duration;
 
-  ret = stream->last_ret = gst_pad_push (stream->pad, buffer);
+  ret = gst_pad_push (stream->pad, buffer);
+  GST_DASH_DEMUX_CLIENT_LOCK (demux);
   if (ret == GST_FLOW_NOT_LINKED) {
+    gboolean all_not_linked = TRUE;
+    GSList *iter;
+
+    /*
+     * At this point, the stream is going to be deactivated, but it
+     * might be possible that we have just received a RECONFIGURE event
+     * and it was ignored because the last_ret of this stream is _OK.
+     *
+     * Is this a possible situation? Any solution?
+     * TODO maybe use the reconfigure flag to check if this
+     * NOT_LINKED should be ignored and just continue playing? */
+
     /* stop this stream, it isn't being used */
     g_object_set (stream->urisrc, "uri", NULL, NULL);
+    gst_media_fragment_info_clear (&stream->current_fragment);
 
-    /* urisrc doesn't need to know or it will error out */
-    ret = GST_FLOW_OK;
+    /* but check if all streams are now NOT_LINKED */
+    for (iter = demux->streams; iter; iter = g_slist_next (iter)) {
+      GstDashDemuxStream *other_stream = iter->data;
+
+      if (other_stream == stream)
+        continue;
+
+      if (other_stream->last_ret != GST_FLOW_NOT_LINKED) {
+        all_not_linked = FALSE;
+        break;
+      }
+    }
+
+    if (all_not_linked) {
+      GST_ELEMENT_ERROR (demux, STREAM, FAILED, ("No streams linked"),
+          ("all pads returned not-linked"));
+    }
   }
+
+  /* set it after checking to avoid a deadlock
+   * if we set it to NOT_LINKED and try to get the lock
+   * that might be already taken by the RECONFIGURE handler.
+   * The reconfigure handler will wait for the pushing thread
+   * to stop to be able to restart and this will cause a deadlock */
+  stream->last_ret = ret;
+  GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
+
+  if (G_UNLIKELY (ret == GST_FLOW_NOT_LINKED))
+    ret = GST_FLOW_OK;          /* urisrc doesn't need to know or it will error out */
   return ret;
 }
 
@@ -1301,9 +1342,7 @@ gst_dash_demux_stream_sinkpad_event (GstPad * pad, GstObject * parent,
       GstFlowReturn flowret;
       /* only let the EOS pass when the stream is really EOS */
       GST_DEBUG_OBJECT (pad, "Fragment download ended");
-      GST_DASH_DEMUX_CLIENT_LOCK (stream->demux);
       flowret = gst_dash_demux_stream_download_loop (stream);
-      GST_DASH_DEMUX_CLIENT_UNLOCK (stream->demux);
       if (flowret != GST_FLOW_EOS) {
         gst_event_unref (event);
         event = NULL;
@@ -1765,11 +1804,13 @@ gst_dash_demux_stream_download_loop (GstDashDemuxStream * stream)
 
 retry:
   GST_LOG_OBJECT (stream->pad, "Starting download loop");
+  GST_PAD_STREAM_LOCK (stream->pad);
 
   if (demux->cancelled) {
     goto cancelled;
   }
 
+  GST_DASH_DEMUX_CLIENT_LOCK (demux);
   if (gst_mpd_client_is_live (demux->client)
       && demux->client->mpd_uri != NULL) {
     switch (gst_dash_demux_refresh_mpd (demux)) {
@@ -1783,9 +1824,15 @@ retry:
 
   /* try to switch to another set of representations if needed */
   caps_event = gst_dash_demux_stream_select_representation_unlocked (stream);
+  GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
 
+  /* TODO pushing with the lock */
   if (G_UNLIKELY (caps_event && !gst_pad_push_event (stream->pad, caps_event))) {
     /* TODO fail if caps is rejected */
+  }
+
+  if (demux->cancelled) {
+    goto cancelled;
   }
 
   /* fetch the next fragment */
@@ -1803,6 +1850,7 @@ retry:
       gint64 update_period = demux->client->mpd_node->minimumUpdatePeriod;
       /* live streaming needs to wait for the next fragment */
       gst_dash_demux_download_wait (stream, update_period);
+      GST_PAD_STREAM_UNLOCK (stream->pad);
       goto retry;
       break;
     }
@@ -1846,6 +1894,7 @@ retry:
           GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
 
           /* This pad is now finished, we lost its reference */
+          GST_PAD_STREAM_UNLOCK (stream->pad);
           return GST_FLOW_OK;
         }
       }
@@ -1860,11 +1909,13 @@ retry:
   }
 
   GST_DEBUG_OBJECT (stream->pad, "Finishing download loop");
+  GST_PAD_STREAM_UNLOCK (stream->pad);
   return flow_ret;
 
 cancelled:
   {
     GST_WARNING_OBJECT (stream->pad, "Cancelled, leaving download task");
+    GST_PAD_STREAM_UNLOCK (stream->pad);
     return GST_FLOW_FLUSHING;
   }
 
@@ -1873,6 +1924,7 @@ end_of_manifest:
     GST_INFO_OBJECT (stream->pad, "End of manifest, leaving download task");
     g_object_set (stream->urisrc, "range-start", (gint64) - 1,
         "range-end", (gint64) - 1, "uri", NULL, NULL);
+    GST_PAD_STREAM_UNLOCK (stream->pad);
     return GST_FLOW_EOS;
   }
 
@@ -1884,6 +1936,7 @@ error_scheduling_download:
     g_object_set (stream->urisrc, "range-start", (gint64) - 1, "range-end",
         (gint64) - 1, "uri", NULL, NULL);
 
+    GST_PAD_STREAM_UNLOCK (stream->pad);
     return GST_FLOW_ERROR;
   }
 }
@@ -2163,6 +2216,7 @@ gst_dash_demux_stream_start_fragment_download (GstDashDemux * demux,
     stream->restart_download = FALSE;
   }
 
+  GST_DASH_DEMUX_CLIENT_LOCK (demux);
   /* look for the next uri to fetch */
   while (uri == NULL) {
     if (stream->need_header) {
@@ -2255,6 +2309,8 @@ gst_dash_demux_stream_start_fragment_download (GstDashDemux * demux,
   /* starting to download a new piece, reset download info */
   gst_dash_demux_stream_reset_download_rate_info (stream);
 
+  GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
+
   if (uri) {
     g_object_set (stream->urisrc, "range-start", range_start,
         "range-end", range_end, NULL);
@@ -2288,6 +2344,7 @@ gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream)
     return GST_FLOW_NOT_LINKED;
   }
 
+  GST_DASH_DEMUX_CLIENT_LOCK (demux);
   if (!gst_mpd_client_get_next_fragment_timestamp (demux->client,
           stream->index, NULL)) {
     GST_INFO_OBJECT (demux,
@@ -2297,9 +2354,10 @@ gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream)
     /* check if this is live and we should wait for more data */
     if (gst_mpd_client_is_live (demux->client)
         && demux->client->mpd_node->minimumUpdatePeriod != -1) {
-      end_of_period = FALSE;
+      GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
       return GST_FLOW_CUSTOM_SUCCESS;   /* TODO wait */
     }
+    GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
     return GST_FLOW_EOS;
   }
 
@@ -2310,8 +2368,17 @@ gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream)
   if (gst_mpd_client_is_live (demux->client) &&
       demux->client->mpd_node->minimumUpdatePeriod != -1) {
 
+    GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
     gst_dash_demux_wait_for_fragment_to_be_available (demux, stream);
+    GST_DASH_DEMUX_CLIENT_LOCK (demux);
   }
+
+  if (demux->cancelled) {
+    GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
+    return GST_FLOW_FLUSHING;
+  }
+
+  GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
 
   /* Get the fragment corresponding to each stream index */
   ret = gst_dash_demux_stream_start_fragment_download (demux, stream);
