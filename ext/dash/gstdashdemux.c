@@ -465,6 +465,8 @@ gst_dash_demux_handle_stream_download_error (GstDashDemuxStream * stream)
        * the next one, might just be a missing fragment on the server.
        * It is also possible that the fragment really doesn't exist when mpds
        * have wrong total duration */
+      /* TODO which thread is calling this? Could be our own thread or the
+       * urisrc thread */
       if (gst_dash_demux_stream_download_loop (stream) == GST_FLOW_EOS) {
         gst_pad_push_event (stream->pad, gst_event_new_eos ());
         return ret;
@@ -2172,7 +2174,7 @@ gst_dash_demux_stream_start_fragment_download (GstDashDemux * demux,
     GstEvent *gap;
 
     GST_DEBUG_OBJECT (stream->pad,
-        "Reactivating stream after to reconfigure event");
+        "Reactivating stream after reconfigure event");
 
     cur = GST_CLOCK_TIME_IS_VALID (stream->position) ? stream->position : 0;
 
