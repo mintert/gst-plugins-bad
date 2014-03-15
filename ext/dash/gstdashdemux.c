@@ -1242,7 +1242,7 @@ gst_dash_demux_stream_sinkpad_chain (GstPad * pad, GstObject * parent,
 {
   GstDashDemuxStream *stream = gst_pad_get_element_private (pad);
   GstDashDemux *demux = stream->demux;
-  GstClockTime timestamp, duration;
+  GstClockTime timestamp;
   GstFlowReturn ret;
 
   buffer = gst_buffer_make_writable (buffer);
@@ -1263,7 +1263,6 @@ gst_dash_demux_stream_sinkpad_chain (GstPad * pad, GstObject * parent,
 
   /* make timestamp start from 0 by subtracting the offset */
   timestamp -= demux->timestamp_offset;
-  duration = GST_BUFFER_DURATION (buffer);
 
   GST_BUFFER_TIMESTAMP (buffer) = timestamp;
 
@@ -1276,8 +1275,6 @@ gst_dash_demux_stream_sinkpad_chain (GstPad * pad, GstObject * parent,
 
   demux->segment.position = timestamp;
   stream->position = timestamp;
-  if (GST_CLOCK_TIME_IS_VALID (duration))
-    stream->position += duration;
 
   ret = gst_pad_push (stream->pad, buffer);
   GST_DASH_DEMUX_CLIENT_LOCK (demux);
@@ -1340,7 +1337,11 @@ gst_dash_demux_stream_sinkpad_event (GstPad * pad, GstObject * parent,
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_EOS:{
       GstFlowReturn flowret;
+
       /* only let the EOS pass when the stream is really EOS */
+      if (GST_CLOCK_TIME_IS_VALID (stream->current_fragment.duration))
+        stream->position += stream->current_fragment.duration;
+
       GST_DEBUG_OBJECT (pad, "Fragment download ended");
       flowret = gst_dash_demux_stream_download_loop (stream);
       if (flowret != GST_FLOW_EOS) {
