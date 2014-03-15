@@ -684,12 +684,23 @@ gst_dash_demux_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
         GstDashDemuxStream *stream = iter->data;
 
         if (stream->pad == pad) {
+          /* TODO should make sure the pad is idle before checking this or use
+           * pending reconfigure flag */
           if (stream->last_ret == GST_FLOW_NOT_LINKED) {
-            stream->last_ret = GST_FLOW_OK;
+            GThread *thread;
+
+            stream->last_ret = GST_FLOW_CUSTOM_SUCCESS;
             stream->restart_download = TRUE;
             stream->need_header = TRUE;
             GST_DEBUG_OBJECT (stream->pad, "Restarting download");
-            gst_dash_demux_stream_download_loop (stream);
+
+            /* needs to run from a separate thread as it will send a query
+             * that will deadlock */
+            thread =
+                g_thread_new (NULL,
+                (GThreadFunc) gst_dash_demux_stream_download_loop_locked,
+                stream);
+            g_thread_unref (thread);
           }
           GST_DASH_DEMUX_CLIENT_UNLOCK (demux);
           gst_event_unref (event);
