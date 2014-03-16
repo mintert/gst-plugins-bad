@@ -418,6 +418,7 @@ gst_dash_demux_handle_stream_download_error (GstDashDemuxStream * stream)
 {
   gboolean ret = FALSE;
   GstDashDemux *demux = stream->demux;
+  gboolean handled = FALSE;
 
   /* Download failed 'by itself'
    * in case this is live, we might be ahead or before playback, where
@@ -467,28 +468,29 @@ gst_dash_demux_handle_stream_download_error (GstDashDemuxStream * stream)
        * have wrong total duration */
       /* TODO which thread is calling this? Could be our own thread or the
        * urisrc thread */
-      if (gst_dash_demux_stream_download_loop (stream) == GST_FLOW_EOS) {
-        return ret;
-      }
+      gst_dash_demux_stream_download_loop (stream);
+      handled = TRUE;
     }
   }
 
-  if (stream->failed_count < DEFAULT_FAILED_COUNT) {
-    gchar *uri;
+  if (!handled) {
+    if (stream->failed_count < DEFAULT_FAILED_COUNT) {
+      gchar *uri;
 
-    GST_WARNING_OBJECT (stream->pad, "Could not fetch the next fragment");
+      GST_WARNING_OBJECT (stream->pad, "Could not fetch the next fragment");
 
-    /* re-set the uri to start again */
-    g_object_get (stream->urisrc, "uri", &uri, NULL);
-    g_object_set (stream->urisrc, "uri", uri, NULL);
+      /* re-set the uri to start again */
+      g_object_get (stream->urisrc, "uri", &uri, NULL);
+      g_object_set (stream->urisrc, "uri", uri, NULL);
 
-  } else {
-    /* post our own message first */
-    GST_ELEMENT_ERROR (demux, RESOURCE, NOT_FOUND,
-        ("Could not download fragment"), (NULL));
-    g_object_set (stream->urisrc, "range-start", (gint64) - 1,
-        "range-end", (gint64) - 1, "uri", NULL, NULL);
-    ret = TRUE;
+    } else {
+      /* post our own message first */
+      GST_ELEMENT_ERROR (demux, RESOURCE, NOT_FOUND,
+          ("Could not download fragment"), (NULL));
+      g_object_set (stream->urisrc, "range-start", (gint64) - 1,
+          "range-end", (gint64) - 1, "uri", NULL, NULL);
+      ret = TRUE;
+    }
   }
 
   return ret;
@@ -527,8 +529,6 @@ gst_dash_demux_handle_message (GstBin * bin, GstMessage * message)
             if (!gst_dash_demux_handle_stream_download_error (stream)) {
               gst_message_unref (message);
               message = NULL;
-
-              gst_dash_demux_stream_download_loop (stream);
             }
             break;
           }
