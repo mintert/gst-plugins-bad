@@ -697,11 +697,12 @@ gst_dash_demux_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
         if (stream->pad == pad) {
           /* TODO should make sure the pad is idle before checking this or use
            * pending reconfigure flag */
-          if (stream->last_ret == GST_FLOW_NOT_LINKED) {
+          if (stream->active == FALSE) {
             GThread *thread;
 
             stream->last_ret = GST_FLOW_CUSTOM_SUCCESS;
             stream->restart_download = TRUE;
+            stream->active = TRUE;
             GST_DEBUG_OBJECT (stream->pad, "Restarting download");
 
             /* needs to run from a separate thread as it will send a query
@@ -838,6 +839,7 @@ gst_dash_demux_setup_all_streams (GstDashDemux * demux)
     stream->index = i;
     stream->input_caps = caps;
     stream->need_header = TRUE;
+    stream->active = TRUE;
     gst_download_rate_init (&stream->dnl_rate);
     gst_download_rate_set_max_length (&stream->dnl_rate,
         DOWNLOAD_RATE_HISTORY_MAX);
@@ -1303,9 +1305,11 @@ gst_dash_demux_stream_sinkpad_chain (GstPad * pad, GstObject * parent,
      * TODO maybe use the reconfigure flag to check if this
      * NOT_LINKED should be ignored and just continue playing? */
 
-    /* stop this stream, it isn't being used */
-    g_object_set (stream->urisrc, "uri", NULL, NULL);
-    gst_media_fragment_info_clear (&stream->current_fragment);
+    /* we do not stop this stream here as sending only a partial fragment
+     * downstream will confuse demuxers if this stream gets restarted later
+     * Ideally we could use a partial flush to avoid downloading the rest of
+     * this fragment
+     * TODO */
 
     /* but check if all streams are now NOT_LINKED */
     for (iter = demux->streams; iter; iter = g_slist_next (iter)) {
@@ -1348,12 +1352,23 @@ gst_dash_demux_stream_sinkpad_event (GstPad * pad, GstObject * parent,
 
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_EOS:{
-      /* only let the EOS pass when the stream is really EOS */
       if (GST_CLOCK_TIME_IS_VALID (stream->current_fragment.duration))
         stream->position += stream->current_fragment.duration;
 
-      GST_DEBUG_OBJECT (pad, "Fragment download ended");
-      gst_dash_demux_stream_download_loop (stream);
+      GST_DEBUG_OBJECT (stream->pad, "Fragment download ended");
+
+      GST_DASH_DEMUX_CLIENT_LOCK (stream->demux);
+      if (stream->last_ret == GST_FLOW_NOT_LINKED) {
+        GST_DEBUG_OBJECT (stream->pad, "Stream not linked, stopping");
+        g_object_set (stream->urisrc, "uri", NULL, NULL);
+        gst_media_fragment_info_clear (&stream->current_fragment);
+        stream->active = FALSE;
+        GST_DASH_DEMUX_CLIENT_UNLOCK (stream->demux);
+      } else {
+        GST_DASH_DEMUX_CLIENT_UNLOCK (stream->demux);
+        gst_dash_demux_stream_download_loop (stream);
+      }
+
       gst_event_unref (event);
       event = NULL;
       break;
@@ -1965,6 +1980,8 @@ gst_dash_demux_resume_download_task (GstDashDemux * demux)
 
   for (iter = demux->streams; iter; iter = g_slist_next (iter)) {
     GstDashDemuxStream *stream = iter->data;
+    stream->last_ret = GST_FLOW_OK;
+    stream->active = GST_FLOW_OK;
     gst_dash_demux_stream_download_loop (stream);
   }
 }

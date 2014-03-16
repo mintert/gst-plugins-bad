@@ -75,6 +75,7 @@ struct _GstDashDemuxStream
   GstFlowReturn last_ret;
   GstClockTime position;
   gboolean restart_download;
+  gboolean active; /* if this stream is running (downloading and pushing) or not */
 
   GstEvent *pending_segment;
 
