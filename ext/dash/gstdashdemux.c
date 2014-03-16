@@ -702,7 +702,6 @@ gst_dash_demux_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
 
             stream->last_ret = GST_FLOW_CUSTOM_SUCCESS;
             stream->restart_download = TRUE;
-            stream->need_header = TRUE;
             GST_DEBUG_OBJECT (stream->pad, "Restarting download");
 
             /* needs to run from a separate thread as it will send a query
@@ -2181,59 +2180,6 @@ gst_dash_demux_stream_start_fragment_download (GstDashDemux * demux,
   gint64 range_start, range_end;
   GstFlowReturn ret = GST_FLOW_OK;
 
-  if (G_UNLIKELY (stream->restart_download)) {
-    GstClockTime cur, ts;
-    gint64 pos;
-    GstEvent *gap;
-
-    GST_DEBUG_OBJECT (stream->pad,
-        "Reactivating stream after reconfigure event");
-
-    cur = GST_CLOCK_TIME_IS_VALID (stream->position) ? stream->position : 0;
-
-    if (gst_pad_peer_query_position (stream->pad, GST_FORMAT_TIME, &pos)) {
-      ts = (GstClockTime) pos;
-      GST_DEBUG_OBJECT (stream->pad, "Downstream position: %"
-          GST_TIME_FORMAT, GST_TIME_ARGS (ts));
-    } else {
-      ts = demux->segment.position;
-      GST_DEBUG_OBJECT (stream->pad, "Downstream position query failed, "
-          "failling back to looking at other pads");
-    }
-
-    GST_DEBUG_OBJECT (stream->pad, "Restarting stream at "
-        "position %" GST_TIME_FORMAT ", current catch up %" GST_TIME_FORMAT,
-        GST_TIME_ARGS (ts), GST_TIME_ARGS (demux->segment.position));
-
-    if (GST_CLOCK_TIME_IS_VALID (ts)) {
-      gst_mpd_client_stream_seek (demux->client, stream->active_stream, ts);
-
-      if (cur < ts) {
-        gap = gst_event_new_gap (cur, ts - cur);
-        gst_pad_push_event (stream->pad, gap);
-      }
-    }
-
-    /* This stream might be entering into catching up mode,
-     * meaning that it will push buffers from this same download thread
-     * until it reaches 'catch_up_timestamp'.
-     *
-     * The reason for this is that in case of stream switching, the other
-     * stream that was previously active might be blocking the stream_loop
-     * in case it is ahead enough that all queues are filled.
-     * In this case, it is possible that a downstream input-selector is
-     * blocking waiting for the currently active stream to reach the
-     * same position of the old linked stream because of the 'sync-streams'
-     * behavior.
-     *
-     * We can push from this thread up to 'catch_up_timestamp' as all other
-     * streams should be around the same timestamp.
-     */
-    stream->last_ret = GST_FLOW_CUSTOM_SUCCESS;
-
-    stream->restart_download = FALSE;
-  }
-
   GST_DASH_DEMUX_CLIENT_LOCK (demux);
   /* look for the next uri to fetch */
   while (uri == NULL) {
@@ -2361,6 +2307,57 @@ gst_dash_demux_stream_schedule_next_fragment (GstDashDemuxStream * stream)
         stream, GST_DEBUG_PAD_NAME (stream->pad));
     return GST_FLOW_NOT_LINKED;
   }
+
+  if (G_UNLIKELY (stream->restart_download)) {
+    GstClockTime cur, ts;
+    gint64 pos;
+    GstEvent *gap;
+
+    GST_DEBUG_OBJECT (stream->pad,
+        "Reactivating stream after reconfigure event");
+
+    cur = GST_CLOCK_TIME_IS_VALID (stream->position) ? stream->position : 0;
+
+    if (gst_pad_peer_query_position (stream->pad, GST_FORMAT_TIME, &pos)) {
+      ts = (GstClockTime) pos;
+      GST_DEBUG_OBJECT (stream->pad, "Downstream position: %"
+          GST_TIME_FORMAT, GST_TIME_ARGS (ts));
+    } else {
+      ts = demux->segment.position;
+      GST_DEBUG_OBJECT (stream->pad, "Downstream position query failed, "
+          "failling back to looking at other pads");
+    }
+
+    if (!GST_CLOCK_TIME_IS_VALID (ts))
+      ts = stream->position;
+    else if (GST_CLOCK_TIME_IS_VALID (stream->position))
+      ts = MAX (ts, stream->position);
+
+    if (GST_CLOCK_TIME_IS_VALID (ts)) {
+
+      gst_mpd_client_stream_seek (demux->client, stream->active_stream, ts);
+      gst_media_fragment_info_clear (&stream->current_fragment);
+      stream->fragment_status = NO_FRAGMENT;
+      stream->need_header = TRUE;
+
+      /* TODO qtdemux expects the headers to have the timestamp,
+       * so we collect it here to set on the buffers pushed */
+      gst_mpd_client_get_next_fragment_timestamp (demux->client, stream->index,
+          &stream->current_fragment.timestamp);
+
+      if (cur < ts) {
+        gap = gst_event_new_gap (cur, ts - cur);
+        gst_pad_push_event (stream->pad, gap);
+      }
+    }
+
+    GST_DEBUG_OBJECT (stream->pad, "Restarting stream at "
+        "position %" GST_TIME_FORMAT, GST_TIME_ARGS (ts));
+
+    stream->last_ret = GST_FLOW_OK;
+    stream->restart_download = FALSE;
+  }
+
 
   GST_DASH_DEMUX_CLIENT_LOCK (demux);
   if (!gst_mpd_client_get_next_fragment_timestamp (demux->client,
