@@ -468,7 +468,6 @@ gst_dash_demux_handle_stream_download_error (GstDashDemuxStream * stream)
       /* TODO which thread is calling this? Could be our own thread or the
        * urisrc thread */
       if (gst_dash_demux_stream_download_loop (stream) == GST_FLOW_EOS) {
-        gst_pad_push_event (stream->pad, gst_event_new_eos ());
         return ret;
       }
     }
@@ -1338,18 +1337,14 @@ gst_dash_demux_stream_sinkpad_event (GstPad * pad, GstObject * parent,
 
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_EOS:{
-      GstFlowReturn flowret;
-
       /* only let the EOS pass when the stream is really EOS */
       if (GST_CLOCK_TIME_IS_VALID (stream->current_fragment.duration))
         stream->position += stream->current_fragment.duration;
 
       GST_DEBUG_OBJECT (pad, "Fragment download ended");
-      flowret = gst_dash_demux_stream_download_loop (stream);
-      if (flowret != GST_FLOW_EOS) {
-        gst_event_unref (event);
-        event = NULL;
-      }
+      gst_dash_demux_stream_download_loop (stream);
+      gst_event_unref (event);
+      event = NULL;
       break;
     }
     case GST_EVENT_SEGMENT:
@@ -1911,6 +1906,12 @@ retry:
       goto error_scheduling_download;
     default:
       break;
+  }
+
+  if (G_UNLIKELY (flow_ret == GST_FLOW_EOS)) {
+    GST_DEBUG_OBJECT (stream->pad, "Stream finished, pushing EOS");
+    gst_pad_push_event (stream->pad, gst_event_new_eos ());
+    stream->last_ret = GST_FLOW_EOS;
   }
 
   GST_DEBUG_OBJECT (stream->pad, "Finishing download loop");
