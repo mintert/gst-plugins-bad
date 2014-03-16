@@ -4294,4 +4294,5 @@ gst_media_fragment_info_clear (GstMediaFragmentInfo * fragment)
   g_free (fragment->index_uri);
   fragment->uri = NULL;
   fragment->index_uri = NULL;
+  fragment->timestamp = GST_CLOCK_TIME_NONE;
 }
