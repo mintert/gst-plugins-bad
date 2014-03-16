@@ -510,6 +510,18 @@ gst_dash_demux_handle_message (GstBin * bin, GstMessage * message)
           GstDashDemuxStream *stream = iter->data;
 
           if (src_parent == (GstObject *) stream->urisrc) {
+#ifndef GST_DISABLE_GST_DEBUG
+            GError *err = NULL;
+            gchar *msg;
+
+            gst_message_parse_error (message, &err, &msg);
+
+            GST_WARNING_OBJECT (stream->pad, "Received error while downloading "
+                "%s : %s", err->message, msg);
+            g_error_free (err);
+            g_free (msg);
+#endif
+
             /* TODO might not be a download error, but we handle everything
              * as if it was. How to detect different error types from HTTP? */
             if (!gst_dash_demux_handle_stream_download_error (stream)) {
