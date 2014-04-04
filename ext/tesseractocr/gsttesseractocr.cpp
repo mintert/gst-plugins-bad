@@ -260,6 +260,12 @@ gst_tesseract_ocr_sink_event (GstPad * pad, GstObject * parent,
   return ret;
 }
 
+static void
+_tesseract_ocr_free_text (gpointer data)
+{
+  delete [] (char *) data;
+}
+
 static GstFlowReturn
 gst_tesseract_ocr_sink_chain (GstPad * pad, GstObject * parent,
     GstBuffer * buffer)
@@ -267,6 +273,7 @@ gst_tesseract_ocr_sink_chain (GstPad * pad, GstObject * parent,
   GstTesseractOcr *tesseractocr;
   GstMapInfo info;
   gchar *text;
+  gint text_len;
   GstBuffer *out_buffer;
 
   tesseractocr = GST_TESSERACT_OCR (parent);
@@ -292,9 +299,10 @@ gst_tesseract_ocr_sink_chain (GstPad * pad, GstObject * parent,
       GST_VIDEO_INFO_PLANE_STRIDE (&tesseractocr->vinfo, 0));
 
   text = tesseractocr->api->GetUTF8Text ();
-  out_buffer = gst_buffer_new_wrapped (text, strlen (text));
-  /* TODO this 'text' variable should be freed with delete[]
-   * according to tesseract docs */
+  text_len = strlen (text);
+  out_buffer = gst_buffer_new_wrapped_full ((GstMemoryFlags) 0,
+      text, text_len + 1,
+      0, text_len + 1, text, _tesseract_ocr_free_text);
 
   GST_DEBUG_OBJECT (tesseractocr, "found text '%s'", text);
 
