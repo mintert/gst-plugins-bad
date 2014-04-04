@@ -2983,6 +2983,21 @@ AG_GST_CHECK_FEATURE(SNDIO, [sndio audio], sndio, [
   fi
 ])
 
+dnl *** tesseractocr ***
+translit(dnm, m, l) AM_CONDITIONAL(USE_TESSERACTOCR, true)
+AG_GST_CHECK_FEATURE(TESSERACTOCR, [tesseract ocr], tesseractocr, [
+  AC_PROG_CXX
+  AC_LANG([C++])
+  AC_CHECK_HEADER([tesseract/baseapi.h], [
+    TESSERACTOCR_LIBS="-ltesseract"
+    AC_SUBST(TESSERACTOCR_LIBS)
+    HAVE_TESSERACTOCR=yes
+  ], [
+    HAVE_TESSERACTOCR=no
+  ])
+  AC_LANG([C])
+])
+
 dnl *** hls ***
 translit(dnm, m, l) AM_CONDITIONAL(USE_HLS, true)
 AG_GST_CHECK_FEATURE(HLS, [http live streaming plugin], hls, [
@@ -3366,6 +3381,7 @@ ext/spandsp/Makefile
 ext/sndio/Makefile
 ext/srtp/Makefile
 ext/teletextdec/Makefile
+ext/tesseractocr/Makefile
 ext/gme/Makefile
 ext/gsettings/Makefile
 ext/gsettings/org.freedesktop.gstreamer.default-elements.gschema.xml

@@ -358,6 +358,12 @@ else
 TELETEXTDEC_DIR=
 endif
 
+if USE_TESSERACTOCR
+TESSERACTOCR_DIR=tesseractocr
+else
+TESSERACTOCR_DIR=
+endif
+
 if USE_GSETTINGS
 GSETTINGS_DIR=gsettings
 else
@@ -454,6 +460,7 @@ SUBDIRS=\
 	$(SPC_DIR) \
 	$(SRTP_DIR) \
 	$(TELETEXTDEC_DIR) \
+	$(TESSERACTOCR_DIR) \
 	$(TIMIDITY_DIR) \
 	$(XVID_DIR) \
 	$(ZBAR_DIR) \
