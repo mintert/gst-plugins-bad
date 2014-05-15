@@ -1048,6 +1048,13 @@ _identify_section (guint16 pid, guint8 table_id)
       if (pid == 0x0014)
         return GST_MPEGTS_SECTION_TOT;
       break;
+    case GST_MTS_TABLE_ID_ATSC_MASTER_GUIDE:
+      if (pid == 0x1ffb)
+        return GST_MPEGTS_SECTION_ATSC_MGT;
+      break;
+    case GST_MTS_TABLE_ID_ATSC_EVENT_INFORMATION:
+      /* FIXME check pids reported on the MGT to confirm expectations */
+      return GST_MPEGTS_SECTION_EIT;
       /* FIXME : FILL */
     default:
       /* Handle ranges */
