@@ -65,6 +65,7 @@ struct _GstTSDemux
 
   /*< private >*/
   MpegTSBaseProgram *program;	/* Current program */
+  MpegTSBaseProgram *old_program; /* Previous program (program change) */
 
   /* segments to be sent */
   GstSegment segment;

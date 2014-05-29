@@ -101,6 +101,13 @@ typedef enum
                                  * Drop all incoming buffers */
 } PendingPacketState;
 
+typedef enum
+{
+  PROGRAM_STATE_UNEXPOSED = 0,  /* program is new and isn't being used */
+  PROGRAM_STATE_EXPOSING,       /* program has started being exposed */
+  PROGRAM_STATE_EXPOSED,        /* program is fully exposed (all pads added) */
+} TSDemuxProgramState;
+
 /* Pending buffer */
 typedef struct
 {
@@ -112,6 +119,7 @@ typedef struct
 } PendingBuffer;
 
 typedef struct _TSDemuxStream TSDemuxStream;
+typedef struct _TSDemuxProgram TSDemuxProgram;
 
 typedef struct _TSDemuxH264ParsingInfos TSDemuxH264ParsingInfos;
 
@@ -197,6 +205,14 @@ struct _TSDemuxStream
   GstTsDemuxKeyFrameScanFunction scan_function;
   TSDemuxH264ParsingInfos h264infos;
 };
+
+struct _TSDemuxProgram
+{
+  MpegTSBaseProgram program;
+
+  TSDemuxProgramState state;
+};
+#define TS_DEMUX_PROGRAM(p) ((TSDemuxProgram *)(p))
 
 #define VIDEO_CAPS \
   GST_STATIC_CAPS (\
@@ -414,6 +430,7 @@ gst_ts_demux_init (GstTSDemux * demux)
   MpegTSBase *base = (MpegTSBase *) demux;
 
   base->stream_size = sizeof (TSDemuxStream);
+  base->program_size = sizeof (TSDemuxProgram);
   base->parse_private_sections = TRUE;
   /* We are not interested in sections (all handled by mpegtsbase) */
   base->push_section = FALSE;
@@ -433,9 +450,9 @@ gst_ts_demux_set_property (GObject * object, guint prop_id,
 
   switch (prop_id) {
     case PROP_PROGRAM_NUMBER:
-      /* FIXME: do something if program is switched as opposed to set at
-       * beginning */
+      GST_OBJECT_LOCK (demux);
       demux->requested_program_number = g_value_get_int (value);
+      GST_OBJECT_UNLOCK (demux);
       break;
     case PROP_EMIT_STATS:
       demux->emit_statistics = g_value_get_boolean (value);
@@ -453,7 +470,9 @@ gst_ts_demux_get_property (GObject * object, guint prop_id,
 
   switch (prop_id) {
     case PROP_PROGRAM_NUMBER:
+      GST_OBJECT_LOCK (demux);
       g_value_set_int (value, demux->requested_program_number);
+      GST_OBJECT_UNLOCK (demux);
       break;
     case PROP_EMIT_STATS:
       g_value_set_boolean (value, demux->emit_statistics);
@@ -1494,6 +1513,7 @@ activate_pad_for_stream (GstTSDemux * tsdemux, TSDemuxStream * stream)
 
     gst_element_add_pad ((GstElement *) tsdemux, stream->pad);
     stream->active = TRUE;
+    TS_DEMUX_PROGRAM (stream->stream.program)->state = PROGRAM_STATE_EXPOSING;
     GST_DEBUG_OBJECT (stream->pad, "done adding pad");
 
     /* Check if all pads were activated, and if so emit no-more-pads */
@@ -1504,7 +1524,31 @@ activate_pad_for_stream (GstTSDemux * tsdemux, TSDemuxStream * stream)
     }
     if (alldone) {
       GST_DEBUG_OBJECT (tsdemux, "All pads were activated, emit no-more-pads");
+      TS_DEMUX_PROGRAM (tsdemux->program)->state = PROGRAM_STATE_EXPOSED;
       gst_element_no_more_pads ((GstElement *) tsdemux);
+
+      if (tsdemux->old_program) {
+        GstEvent *event = gst_event_new_eos ();
+
+        /* close the old program */
+        for (tmp = tsdemux->old_program->stream_list; tmp; tmp = tmp->next) {
+          TSDemuxStream *stream = (TSDemuxStream *) tmp->data;
+          if (stream->pad) {
+
+            gst_ts_demux_stream_finish (tsdemux, stream);
+
+            gst_flow_combiner_remove_pad (tsdemux->flowcombiner, stream->pad);
+            GST_DEBUG_OBJECT (tsdemux, "Remove pad %s:%s",
+                GST_DEBUG_PAD_NAME (stream->pad));
+            gst_element_remove_pad (GST_ELEMENT_CAST (tsdemux), stream->pad);
+          }
+        }
+        gst_event_unref (event);
+        TS_DEMUX_PROGRAM (tsdemux->old_program)->state =
+            PROGRAM_STATE_UNEXPOSED;
+        mpegts_base_program_unref (tsdemux->old_program);
+        tsdemux->old_program = NULL;
+      }
     }
   } else
     GST_WARNING_OBJECT (tsdemux,
@@ -1551,16 +1595,20 @@ gst_ts_demux_program_started (MpegTSBase * base, MpegTSBaseProgram * program)
 {
   GstTSDemux *demux = GST_TS_DEMUX (base);
 
+  GST_OBJECT_LOCK (demux);
   GST_DEBUG ("Current program %d, new program %d requested program %d",
       (gint) demux->program_number, program->program_number,
       demux->requested_program_number);
 
-  if (demux->requested_program_number == program->program_number ||
-      (demux->requested_program_number == -1 && demux->program_number == -1)) {
+  GST_LOG ("program %d started", program->program_number);
+  if (demux->program == NULL &&
+      (demux->requested_program_number == program->program_number ||
+          (demux->requested_program_number == -1
+              && demux->program_number == -1))) {
 
-    GST_LOG ("program %d started", program->program_number);
     demux->program_number = program->program_number;
-    demux->program = program;
+    demux->program = mpegts_base_program_ref (program);
+    TS_DEMUX_PROGRAM (demux->program)->state = PROGRAM_STATE_UNEXPOSED;
 
     /* If this is not the initial program, we need to calculate
      * an update newsegment */
@@ -1568,6 +1616,7 @@ gst_ts_demux_program_started (MpegTSBase * base, MpegTSBaseProgram * program)
 
     /* FIXME : When do we emit no_more_pads ? */
   }
+  GST_OBJECT_UNLOCK (demux);
 }
 
 static void
@@ -1575,7 +1624,14 @@ gst_ts_demux_program_stopped (MpegTSBase * base, MpegTSBaseProgram * program)
 {
   GstTSDemux *demux = GST_TS_DEMUX (base);
 
+  if (demux->old_program == program) {
+    TS_DEMUX_PROGRAM (demux->old_program)->state = PROGRAM_STATE_UNEXPOSED;
+    mpegts_base_program_unref (demux->old_program);
+    demux->old_program = NULL;
+  }
   if (demux->program == program) {
+    TS_DEMUX_PROGRAM (demux->program)->state = PROGRAM_STATE_UNEXPOSED;
+    mpegts_base_program_unref (demux->program);
     demux->program = NULL;
     demux->program_number = -1;
   }
@@ -2279,8 +2335,91 @@ gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
   TSDemuxStream *stream = NULL;
   GstFlowReturn res = GST_FLOW_OK;
 
+  GST_OBJECT_LOCK (base);
+  if (G_UNLIKELY ((demux->requested_program_number == -1 &&
+              demux->program == NULL) ||
+          (demux->requested_program_number != -1 &&
+              (demux->program_number != demux->requested_program_number)))) {
+    gboolean changed = FALSE;
+
+    GST_DEBUG_OBJECT (demux, "Old program: %p %d %d", demux->old_program,
+        demux->old_program ? demux->old_program->program_number : -1,
+        demux->old_program ? TS_DEMUX_PROGRAM (demux->old_program)->state : -1);
+    GST_DEBUG_OBJECT (demux, "Current program: %p %d %d", demux->program,
+        demux->program ? demux->program->program_number : -1,
+        demux->program ? TS_DEMUX_PROGRAM (demux->program)->state : -1);
+    GST_DEBUG_OBJECT (demux, "Requested program: %d",
+        demux->requested_program_number);
+
+    if (demux->program) {
+      switch (TS_DEMUX_PROGRAM (demux->program)->state) {
+        case PROGRAM_STATE_UNEXPOSED:
+          /* we can just remove this program and add the newly requested one */
+          mpegts_base_program_unref (demux->program);
+
+          /* special case where the old program is exposed
+           * and is the newly requested program */
+          if (demux->old_program
+              && TS_DEMUX_PROGRAM (demux->old_program)->state ==
+              PROGRAM_STATE_EXPOSED &&
+              (demux->old_program->program_number ==
+                  demux->requested_program_number
+                  || demux->requested_program_number == -1)) {
+            demux->program = demux->old_program;
+            demux->old_program = NULL;
+            demux->program_number = demux->program->program_number;
+          } else {
+            demux->program =
+                mpegts_base_get_program (base, demux->requested_program_number);
+            if (demux->program) {
+              mpegts_base_program_ref (demux->program);
+              demux->program_number = demux->program->program_number;
+            }
+            changed = TRUE;
+          }
+          break;
+        case PROGRAM_STATE_EXPOSING:
+          /* if the current program is still exposing, we can't switch now */
+          break;
+        case PROGRAM_STATE_EXPOSED:
+          g_assert (demux->old_program == NULL);
+          demux->old_program = demux->program;
+          demux->program = mpegts_base_get_program (base,
+              demux->requested_program_number);
+          if (demux->program) {
+            mpegts_base_program_ref (demux->program);
+            demux->program_number = demux->program->program_number;
+          }
+          changed = TRUE;
+          break;
+        default:
+          g_assert_not_reached ();
+          break;
+      }
+    } else {
+      demux->program = mpegts_base_get_program (base,
+          demux->requested_program_number);
+      if (demux->program) {
+        mpegts_base_program_ref (demux->program);
+        demux->program_number = demux->program->program_number;
+      }
+      changed = TRUE;
+    }
+
+    /* If this is not the initial program, we need to calculate
+     * an update newsegment */
+    if (changed && demux->program)
+      demux->calculate_update_segment = !demux->program->initial_program;
+
+  }
+  GST_OBJECT_UNLOCK (base);
+
   if (G_LIKELY (demux->program)) {
     stream = (TSDemuxStream *) demux->program->streams[packet->pid];
+
+    if (stream == NULL && demux->old_program) {
+      stream = (TSDemuxStream *) demux->old_program->streams[packet->pid];
+    }
 
     if (stream) {
       res = gst_ts_demux_handle_packet (demux, stream, packet, section);
