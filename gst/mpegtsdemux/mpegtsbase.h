@@ -63,11 +63,16 @@ struct _MpegTSBaseStream
   /* Content of the registration descriptor (if present) */
   guint32             registration_id;
 
+  /* Pointer to the parent program */
+  MpegTSBaseProgram  *program;
+
   GstMpegtsPMTStream *stream;
 };
 
 struct _MpegTSBaseProgram
 {
+  gint                refcount;
+
   gint                program_number;
   guint16             pmt_pid;
   guint16             pcr_pid;
@@ -209,6 +214,9 @@ struct _MpegTSBaseClass {
 #define MPEGTS_BIT_IS_SET(field, offs) ((field)[(offs) >> 3] &   (1 << ((offs) & 0x7)))
 
 G_GNUC_INTERNAL GType mpegts_base_get_type(void);
+
+G_GNUC_INTERNAL MpegTSBaseProgram *mpegts_base_program_ref (MpegTSBaseProgram * program);
+G_GNUC_INTERNAL void mpegts_base_program_unref (MpegTSBaseProgram * program);
 
 G_GNUC_INTERNAL MpegTSBaseProgram *mpegts_base_get_program (MpegTSBase * base, gint program_number);
 G_GNUC_INTERNAL MpegTSBaseProgram *mpegts_base_add_program (MpegTSBase * base, gint program_number, guint16 pmt_pid);

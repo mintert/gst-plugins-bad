@@ -1572,7 +1572,7 @@ gst_ts_demux_record_pts (GstTSDemux * demux, TSDemuxStream * stream,
   /* Compute PTS in GstClockTime */
   stream->pts =
       mpegts_packetizer_pts_to_ts (MPEG_TS_BASE_PACKETIZER (demux),
-      MPEGTIME_TO_GSTTIME (pts), demux->program->pcr_pid);
+      MPEGTIME_TO_GSTTIME (pts), bs->program->pcr_pid);
 
   GST_LOG ("pid 0x%04x Stored PTS %" G_GUINT64_FORMAT, bs->pid, stream->pts);
 
@@ -1606,7 +1606,7 @@ gst_ts_demux_record_dts (GstTSDemux * demux, TSDemuxStream * stream,
   /* Compute DTS in GstClockTime */
   stream->dts =
       mpegts_packetizer_pts_to_ts (MPEG_TS_BASE_PACKETIZER (demux),
-      MPEGTIME_TO_GSTTIME (dts), demux->program->pcr_pid);
+      MPEGTIME_TO_GSTTIME (dts), bs->program->pcr_pid);
 
   GST_LOG ("pid 0x%04x Stored DTS %" G_GUINT64_FORMAT, bs->pid, stream->dts);
 
@@ -1649,6 +1649,7 @@ check_pending_buffers (GstTSDemux * demux)
   /* 3. Go over all streams that have current/pending data */
   for (tmp = demux->program->stream_list; tmp; tmp = tmp->next) {
     TSDemuxStream *tmpstream = (TSDemuxStream *) tmp->data;
+    MpegTSBaseStream *bstream = tmp->data;
     PendingBuffer *pend;
     guint64 firstval, lastval, ts;
 
@@ -1678,7 +1679,7 @@ check_pending_buffers (GstTSDemux * demux)
     }
     /* 3.2 Add to the offset the report TS for the current DTS */
     ts = mpegts_packetizer_pts_to_ts (MPEG_TS_BASE_PACKETIZER (demux),
-        MPEGTIME_TO_GSTTIME (lastval), demux->program->pcr_pid);
+        MPEGTIME_TO_GSTTIME (lastval), bstream->program->pcr_pid);
     if (ts == GST_CLOCK_TIME_NONE) {
       GST_WARNING ("THIS SHOULD NOT HAPPEN !");
       continue;
@@ -1699,6 +1700,7 @@ check_pending_buffers (GstTSDemux * demux)
   /* 4. Go over all streams */
   for (tmp = demux->program->stream_list; tmp; tmp = tmp->next) {
     TSDemuxStream *stream = (TSDemuxStream *) tmp->data;
+    MpegTSBaseStream *bstream = tmp->data;
 
     stream->pending_ts = FALSE;
     /* 4.1 Set pending_ts for FALSE */
@@ -1711,11 +1713,11 @@ check_pending_buffers (GstTSDemux * demux)
         if (pend->pts != -1)
           GST_BUFFER_PTS (pend->buffer) =
               mpegts_packetizer_pts_to_ts (MPEG_TS_BASE_PACKETIZER (demux),
-              MPEGTIME_TO_GSTTIME (pend->pts), demux->program->pcr_pid);
+              MPEGTIME_TO_GSTTIME (pend->pts), bstream->program->pcr_pid);
         if (pend->dts != -1)
           GST_BUFFER_DTS (pend->buffer) =
               mpegts_packetizer_pts_to_ts (MPEG_TS_BASE_PACKETIZER (demux),
-              MPEGTIME_TO_GSTTIME (pend->dts), demux->program->pcr_pid);
+              MPEGTIME_TO_GSTTIME (pend->dts), bstream->program->pcr_pid);
         /* 4.2.2 Set first_dts to TS of lowest DTS (for segment) */
         if (stream->first_dts == GST_CLOCK_TIME_NONE) {
           if (GST_BUFFER_DTS (pend->buffer) != GST_CLOCK_TIME_NONE)
@@ -1730,14 +1732,14 @@ check_pending_buffers (GstTSDemux * demux)
       if (stream->raw_dts != -1) {
         stream->dts =
             mpegts_packetizer_pts_to_ts (MPEG_TS_BASE_PACKETIZER (demux),
-            MPEGTIME_TO_GSTTIME (stream->raw_dts), demux->program->pcr_pid);
+            MPEGTIME_TO_GSTTIME (stream->raw_dts), bstream->program->pcr_pid);
         if (stream->first_dts == GST_CLOCK_TIME_NONE)
           stream->first_dts = stream->dts;
       }
       if (stream->raw_pts != -1) {
         stream->pts =
             mpegts_packetizer_pts_to_ts (MPEG_TS_BASE_PACKETIZER (demux),
-            MPEGTIME_TO_GSTTIME (stream->raw_pts), demux->program->pcr_pid);
+            MPEGTIME_TO_GSTTIME (stream->raw_pts), bstream->program->pcr_pid);
         if (stream->first_dts == GST_CLOCK_TIME_NONE)
           stream->first_dts = stream->pts;
       }

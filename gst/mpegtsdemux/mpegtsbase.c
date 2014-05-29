@@ -224,7 +224,7 @@ mpegts_base_init (MpegTSBase * base)
   base->disposed = FALSE;
   base->packetizer = mpegts_packetizer_new ();
   base->programs = g_hash_table_new_full (g_direct_hash, g_direct_equal,
-      NULL, (GDestroyNotify) mpegts_base_free_program);
+      NULL, (GDestroyNotify) mpegts_base_program_unref);
 
   base->parse_private_sections = FALSE;
   base->is_pes = g_new0 (guint8, 1024);
@@ -334,6 +334,7 @@ mpegts_base_new_program (MpegTSBase * base,
       program_number, pmt_pid);
 
   program = g_malloc0 (base->program_size);
+  program->refcount = 1;
   program->program_number = program_number;
   program->pmt_pid = pmt_pid;
   program->pcr_pid = G_MAXUINT16;
@@ -365,6 +366,34 @@ mpegts_base_add_program (MpegTSBase * base,
       GINT_TO_POINTER (program_number), program);
 
   return program;
+}
+
+MpegTSBaseProgram *
+mpegts_base_program_ref (MpegTSBaseProgram * program)
+{
+  g_return_val_if_fail (program != NULL, NULL);
+
+  GST_TRACE ("%p ref %d->%d", program, program->refcount,
+      program->refcount + 1);
+
+  g_atomic_int_inc (&program->refcount);
+
+  return program;
+}
+
+void
+mpegts_base_program_unref (MpegTSBaseProgram * program)
+{
+  g_return_if_fail (program != NULL);
+
+  GST_TRACE ("%p unref %d->%d", program, program->refcount,
+      program->refcount - 1);
+
+  g_return_if_fail (program->refcount > 0);
+
+  if (g_atomic_int_dec_and_test (&program->refcount)) {
+    mpegts_base_free_program (program);
+  }
 }
 
 MpegTSBaseProgram *
@@ -470,6 +499,7 @@ mpegts_base_program_add_stream (MpegTSBase * base,
 
 
   program->streams[pid] = bstream;
+  bstream->program = program;
   program->stream_list = g_list_append (program->stream_list, bstream);
 
   if (klass->stream_added)
@@ -867,7 +897,7 @@ mpegts_base_apply_pmt (MpegTSBase * base, GstMpegtsSection * section)
 
     /* Desactivate the old program */
     mpegts_base_deactivate_program (base, old_program);
-    mpegts_base_free_program (old_program);
+    mpegts_base_program_unref (old_program);
     initial_program = FALSE;
   } else
     program = old_program;
