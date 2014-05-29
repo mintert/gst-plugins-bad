@@ -141,6 +141,10 @@ struct _TSDemuxStream
 
   GstPad *pad;
 
+  /* Data persisted accross pad removal/add on program changes */
+  GstCaps *caps;
+  gchar *stream_id;
+
   /* Whether the pad was added or not */
   gboolean active;
 
@@ -1004,11 +1008,40 @@ gst_ts_demux_create_tags (TSDemuxStream * stream)
   }
 }
 
+static void
+gst_ts_demux_stream_set_start_events (GstTSDemux * demux,
+    TSDemuxStream * stream, GstPad * pad)
+{
+  MpegTSBase *base = (MpegTSBase *) demux;
+  GstEvent *event;
+
+  event = gst_pad_get_sticky_event (base->sinkpad, GST_EVENT_STREAM_START, 0);
+  if (event) {
+    if (gst_event_parse_group_id (event, &demux->group_id))
+      demux->have_group_id = TRUE;
+    else
+      demux->have_group_id = FALSE;
+    gst_event_unref (event);
+  } else if (!demux->have_group_id) {
+    demux->have_group_id = TRUE;
+    demux->group_id = gst_util_group_id_next ();
+  }
+  event = gst_event_new_stream_start (stream->stream_id);
+  if (demux->have_group_id)
+    gst_event_set_group_id (event, demux->group_id);
+
+  gst_pad_push_event (pad, event);
+  gst_pad_set_caps (pad, stream->caps);
+  if (!stream->taglist)
+    stream->taglist = gst_tag_list_new_empty ();
+  gst_pb_utils_add_codec_description_to_tag_list (stream->taglist, NULL,
+      stream->caps);
+}
+
 static GstPad *
 create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
     MpegTSBaseProgram * program)
 {
-  GstTSDemux *demux = GST_TS_DEMUX (base);
   TSDemuxStream *stream = (TSDemuxStream *) bstream;
   gchar *name = NULL;
   GstCaps *caps = NULL;
@@ -1324,40 +1357,17 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
 
 done:
   if (template && name && caps) {
-    GstEvent *event;
-    gchar *stream_id;
 
     GST_LOG ("stream:%p creating pad with name %s and caps %" GST_PTR_FORMAT,
         stream, name, caps);
     pad = gst_pad_new_from_template (template, name);
     gst_pad_set_active (pad, TRUE);
     gst_pad_use_fixed_caps (pad);
-    stream_id =
+    stream->stream_id =
         gst_pad_create_stream_id_printf (pad, GST_ELEMENT_CAST (base), "%08x",
         bstream->pid);
+    stream->caps = gst_caps_ref (caps);
 
-    event = gst_pad_get_sticky_event (base->sinkpad, GST_EVENT_STREAM_START, 0);
-    if (event) {
-      if (gst_event_parse_group_id (event, &demux->group_id))
-        demux->have_group_id = TRUE;
-      else
-        demux->have_group_id = FALSE;
-      gst_event_unref (event);
-    } else if (!demux->have_group_id) {
-      demux->have_group_id = TRUE;
-      demux->group_id = gst_util_group_id_next ();
-    }
-    event = gst_event_new_stream_start (stream_id);
-    if (demux->have_group_id)
-      gst_event_set_group_id (event, demux->group_id);
-
-    gst_pad_push_event (pad, event);
-    g_free (stream_id);
-    gst_pad_set_caps (pad, caps);
-    if (!stream->taglist)
-      stream->taglist = gst_tag_list_new_empty ();
-    gst_pb_utils_add_codec_description_to_tag_list (stream->taglist, NULL,
-        caps);
     gst_pad_set_query_function (pad, gst_ts_demux_srcpad_query);
     gst_pad_set_event_function (pad, gst_ts_demux_srcpad_event);
   }
@@ -1424,6 +1434,24 @@ tsdemux_h264_parsing_info_clear (TSDemuxH264ParsingInfos * h264infos)
 }
 
 static void
+gst_ts_demux_stream_finish (GstTSDemux * tsdemux, TSDemuxStream * stream)
+{
+  if (stream->active && gst_pad_is_active (stream->pad)) {
+    /* Flush out all data */
+    GST_DEBUG_OBJECT (stream->pad, "Flushing out pending data");
+    gst_ts_demux_push_pending_data (tsdemux, stream);
+
+    GST_DEBUG_OBJECT (stream->pad, "Pushing out EOS");
+    gst_pad_push_event (stream->pad, gst_event_new_eos ());
+    GST_DEBUG_OBJECT (stream->pad, "Deactivating and removing pad");
+    gst_pad_set_active (stream->pad, FALSE);
+    stream->active = FALSE;
+    stream->need_newsegment = TRUE;
+    stream->discont = TRUE;
+  }
+}
+
+static void
 gst_ts_demux_stream_removed (MpegTSBase * base, MpegTSBaseStream * bstream)
 {
   TSDemuxStream *stream = (TSDemuxStream *) bstream;
@@ -1432,21 +1460,16 @@ gst_ts_demux_stream_removed (MpegTSBase * base, MpegTSBaseStream * bstream)
     gst_flow_combiner_remove_pad (GST_TS_DEMUX_CAST (base)->flowcombiner,
         stream->pad);
     if (stream->active) {
-
-      if (gst_pad_is_active (stream->pad)) {
-        /* Flush out all data */
-        GST_DEBUG_OBJECT (stream->pad, "Flushing out pending data");
-        gst_ts_demux_push_pending_data ((GstTSDemux *) base, stream);
-
-        GST_DEBUG_OBJECT (stream->pad, "Pushing out EOS");
-        gst_pad_push_event (stream->pad, gst_event_new_eos ());
-        gst_pad_set_active (stream->pad, FALSE);
-      }
-
+      gst_ts_demux_stream_finish ((GstTSDemux *) base, stream);
       GST_DEBUG_OBJECT (stream->pad, "Removing pad");
       gst_element_remove_pad (GST_ELEMENT_CAST (base), stream->pad);
-      stream->active = FALSE;
     }
+    gst_object_unref (stream->pad);
+    g_free (stream->stream_id);
+    stream->stream_id = NULL;
+    if (stream->caps)
+      gst_caps_unref (stream->caps);
+    stream->caps = NULL;
     stream->pad = NULL;
   }
 
@@ -1464,6 +1487,11 @@ activate_pad_for_stream (GstTSDemux * tsdemux, TSDemuxStream * stream)
   if (stream->pad) {
     GST_DEBUG_OBJECT (tsdemux, "Activating pad %s:%s for stream %p",
         GST_DEBUG_PAD_NAME (stream->pad), stream);
+    gst_object_ref (stream->pad);
+    gst_pad_set_active (stream->pad, TRUE);
+
+    gst_ts_demux_stream_set_start_events (tsdemux, stream, stream->pad);
+
     gst_element_add_pad ((GstElement *) tsdemux, stream->pad);
     stream->active = TRUE;
     GST_DEBUG_OBJECT (stream->pad, "done adding pad");
