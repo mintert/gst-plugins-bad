@@ -724,7 +724,7 @@ gst_dvbsrc_class_init (GstDvbSrcClass * klass)
       ARG_DVBSRC_ISDBT_PARTIAL_RECEPTION,
       g_param_spec_int ("isdbt-partial-reception",
           "ISB-T partial reception",
-          "(ISDB-T) Partial Reception (-1 = AUTO)", 1, 7,
+          "(ISDB-T) Partial Reception (-1 = AUTO)", -1, 7,
           DEFAULT_ISDBT_PARTIAL_RECEPTION, G_PARAM_READWRITE));
 
   g_object_class_install_property (gobject_class,
@@ -752,7 +752,7 @@ gst_dvbsrc_class_init (GstDvbSrcClass * klass)
       ARG_DVBSRC_ISDBT_SB_SEGMENT_COUNT,
       g_param_spec_int ("isdbt-sb-segment-count",
           "ISB-T SB segment count",
-          "(ISDB-T) SB segment count", 1, 13,
+          "(ISDB-T) SB segment count", -1, 13,
           DEFAULT_ISDBT_SB_SEGMENT_COUNT, G_PARAM_READWRITE));
 
   g_object_class_install_property (gobject_class, ARG_DVBSRC_ISDBT_LAYERA_FEC,
@@ -1204,12 +1204,12 @@ gst_dvbsrc_set_property (GObject * _object, guint prop_id,
       break;
     case ARG_DVBSRC_ISDBT_LAYERA_FEC:
       g_mutex_lock (&object->tune_mutex);
-      object->isdbt_layera_fec = g_value_get_int (value);
+      object->isdbt_layera_fec = g_value_get_enum (value);
       g_mutex_unlock (&object->tune_mutex);
       break;
     case ARG_DVBSRC_ISDBT_LAYERA_MODULATION:
       g_mutex_lock (&object->tune_mutex);
-      object->isdbt_layera_modulation = g_value_get_int (value);
+      object->isdbt_layera_modulation = g_value_get_enum (value);
       g_mutex_unlock (&object->tune_mutex);
       break;
     case ARG_DVBSRC_ISDBT_LAYERA_SEGMENT_COUNT:
@@ -1224,12 +1224,12 @@ gst_dvbsrc_set_property (GObject * _object, guint prop_id,
       break;
     case ARG_DVBSRC_ISDBT_LAYERB_FEC:
       g_mutex_lock (&object->tune_mutex);
-      object->isdbt_layerb_fec = g_value_get_int (value);
+      object->isdbt_layerb_fec = g_value_get_enum (value);
       g_mutex_unlock (&object->tune_mutex);
       break;
     case ARG_DVBSRC_ISDBT_LAYERB_MODULATION:
       g_mutex_lock (&object->tune_mutex);
-      object->isdbt_layerb_modulation = g_value_get_int (value);
+      object->isdbt_layerb_modulation = g_value_get_enum (value);
       g_mutex_unlock (&object->tune_mutex);
       break;
     case ARG_DVBSRC_ISDBT_LAYERB_SEGMENT_COUNT:
@@ -1244,12 +1244,12 @@ gst_dvbsrc_set_property (GObject * _object, guint prop_id,
       break;
     case ARG_DVBSRC_ISDBT_LAYERC_FEC:
       g_mutex_lock (&object->tune_mutex);
-      object->isdbt_layerc_fec = g_value_get_int (value);
+      object->isdbt_layerc_fec = g_value_get_enum (value);
       g_mutex_unlock (&object->tune_mutex);
       break;
     case ARG_DVBSRC_ISDBT_LAYERC_MODULATION:
       g_mutex_lock (&object->tune_mutex);
-      object->isdbt_layerc_modulation = g_value_get_int (value);
+      object->isdbt_layerc_modulation = g_value_get_enum (value);
       g_mutex_unlock (&object->tune_mutex);
       break;
     case ARG_DVBSRC_ISDBT_LAYERC_SEGMENT_COUNT:
@@ -1396,10 +1396,10 @@ gst_dvbsrc_get_property (GObject * _object, guint prop_id,
       g_value_set_int (value, object->isdbt_sb_segment_count);
       break;
     case ARG_DVBSRC_ISDBT_LAYERA_FEC:
-      g_value_set_int (value, object->isdbt_layera_fec);
+      g_value_set_enum (value, object->isdbt_layera_fec);
       break;
     case ARG_DVBSRC_ISDBT_LAYERA_MODULATION:
-      g_value_set_int (value, object->isdbt_layera_modulation);
+      g_value_set_enum (value, object->isdbt_layera_modulation);
       break;
     case ARG_DVBSRC_ISDBT_LAYERA_SEGMENT_COUNT:
       g_value_set_int (value, object->isdbt_layera_segment_count);
@@ -1408,10 +1408,10 @@ gst_dvbsrc_get_property (GObject * _object, guint prop_id,
       g_value_set_int (value, object->isdbt_layera_time_interleaving);
       break;
     case ARG_DVBSRC_ISDBT_LAYERB_FEC:
-      g_value_set_int (value, object->isdbt_layerb_fec);
+      g_value_set_enum (value, object->isdbt_layerb_fec);
       break;
     case ARG_DVBSRC_ISDBT_LAYERB_MODULATION:
-      g_value_set_int (value, object->isdbt_layerb_modulation);
+      g_value_set_enum (value, object->isdbt_layerb_modulation);
       break;
     case ARG_DVBSRC_ISDBT_LAYERB_SEGMENT_COUNT:
       g_value_set_int (value, object->isdbt_layerb_segment_count);
@@ -1420,10 +1420,10 @@ gst_dvbsrc_get_property (GObject * _object, guint prop_id,
       g_value_set_int (value, object->isdbt_layerb_time_interleaving);
       break;
     case ARG_DVBSRC_ISDBT_LAYERC_FEC:
-      g_value_set_int (value, object->isdbt_layerc_fec);
+      g_value_set_enum (value, object->isdbt_layerc_fec);
       break;
     case ARG_DVBSRC_ISDBT_LAYERC_MODULATION:
-      g_value_set_int (value, object->isdbt_layerc_modulation);
+      g_value_set_enum (value, object->isdbt_layerc_modulation);
       break;
     case ARG_DVBSRC_ISDBT_LAYERC_SEGMENT_COUNT:
       g_value_set_int (value, object->isdbt_layerc_segment_count);
@@ -1432,13 +1432,13 @@ gst_dvbsrc_get_property (GObject * _object, guint prop_id,
       g_value_set_int (value, object->isdbt_layerc_time_interleaving);
       break;
     case ARG_DVBSRC_LNB_SLOF:
-      g_value_set_uint (value, object->lnb_slof);
+      g_value_set_uint64 (value, object->lnb_slof);
       break;
     case ARG_DVBSRC_LNB_LOF1:
-      g_value_set_uint (value, object->lnb_lof1);
+      g_value_set_uint64 (value, object->lnb_lof1);
       break;
     case ARG_DVBSRC_LNB_LOF2:
-      g_value_set_uint (value, object->lnb_lof2);
+      g_value_set_uint64 (value, object->lnb_lof2);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
