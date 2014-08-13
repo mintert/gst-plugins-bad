@@ -408,11 +408,6 @@ gst_ts_demux_reset (MpegTSBase * base)
     demux->segment_event = NULL;
   }
 
-  if (demux->update_segment) {
-    gst_event_unref (demux->update_segment);
-    demux->update_segment = NULL;
-  }
-
   if (demux->global_tags) {
     gst_tag_list_unref (demux->global_tags);
     demux->global_tags = NULL;
@@ -1660,6 +1655,7 @@ gst_ts_demux_record_pts (GstTSDemux * demux, TSDemuxStream * stream,
   stream->pts =
       mpegts_packetizer_pts_to_ts (MPEG_TS_BASE_PACKETIZER (demux),
       MPEGTIME_TO_GSTTIME (pts), bs->program->pcr_pid);
+  demux->segment.position = MAX (stream->pts, demux->segment.position);
 
   GST_LOG ("pid 0x%04x Stored PTS %" G_GUINT64_FORMAT, bs->pid, stream->pts);
 
@@ -2000,13 +1996,13 @@ calculate_and_push_newsegment (GstTSDemux * demux, TSDemuxStream * stream)
   GstClockTime lowest_pts = GST_CLOCK_TIME_NONE;
   GstClockTime firstts = 0;
   GList *tmp;
+  gint64 segbase = 0;
 
   GST_DEBUG ("Creating new newsegment for stream %p", stream);
 
-  /* 1) If we need to calculate an update newsegment, do it
-   * 2) If we need to calculate a new newsegment, do it
-   * 3) If an update_segment is valid, push it
-   * 4) If a newsegment is valid, push it */
+  /* 1) If we need to calculate an update segment, do it
+   * 2) If we only need to push a new segment, do it
+   * 3) If a newsegment is valid, push it */
 
   /* Speedup : if we don't need to calculate anything, go straight to pushing */
   if (!demux->calculate_update_segment && demux->segment_event)
@@ -2029,16 +2025,9 @@ calculate_and_push_newsegment (GstTSDemux * demux, TSDemuxStream * stream)
 
   if (demux->calculate_update_segment) {
     GST_DEBUG ("Calculating update segment");
-    /* If we have a valid segment, create an update of that */
-    if (demux->segment.format == GST_FORMAT_TIME) {
-      GstSegment update_segment;
-      GST_DEBUG ("Re-using segment " SEGMENT_FORMAT,
-          SEGMENT_ARGS (demux->segment));
-      gst_segment_copy_into (&demux->segment, &update_segment);
-      update_segment.stop = firstts;
-      demux->update_segment = gst_event_new_segment (&update_segment);
-    }
+    segbase = demux->segment.position - demux->segment.start;
     demux->calculate_update_segment = FALSE;
+    gst_event_replace (&demux->segment_event, NULL);
   }
 
   if (demux->segment.format != GST_FORMAT_TIME) {
@@ -2064,8 +2053,12 @@ calculate_and_push_newsegment (GstTSDemux * demux, TSDemuxStream * stream)
       if (GST_CLOCK_TIME_IS_VALID (demux->segment.stop) )
         demux->segment.stop += firstts - demux->segment.start;
       demux->segment.position = firstts;
+      demux->segment.base += segbase;
     }
   }
+
+  GST_ERROR ("SEGMENT %" GST_SEGMENT_FORMAT, &demux->segment);
+  GST_ERROR ("SEGMENT EV %" GST_PTR_FORMAT, demux->segment_event);
 
   if (!demux->segment_event) {
     demux->segment_event = gst_event_new_segment (&demux->segment);
@@ -2073,12 +2066,6 @@ calculate_and_push_newsegment (GstTSDemux * demux, TSDemuxStream * stream)
   }
 
 push_new_segment:
-  if (demux->update_segment) {
-    GST_DEBUG_OBJECT (stream->pad, "Pushing update segment");
-    gst_event_ref (demux->update_segment);
-    gst_pad_push_event (stream->pad, demux->update_segment);
-  }
-
   if (demux->segment_event) {
     GST_DEBUG_OBJECT (stream->pad, "Pushing newsegment event");
     gst_event_ref (demux->segment_event);
