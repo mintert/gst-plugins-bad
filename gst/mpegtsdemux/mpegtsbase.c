@@ -203,6 +203,8 @@ mpegts_base_reset (MpegTSBase * base)
   base->upstream_live = FALSE;
   base->queried_latency = FALSE;
 
+  base->initial_program = TRUE;
+
   g_hash_table_foreach_remove (base->programs, (GHRFunc) remove_each_program,
       base);
 
@@ -660,8 +662,7 @@ mpegts_base_deactivate_program (MpegTSBase * base, MpegTSBaseProgram * program)
 
 static void
 mpegts_base_activate_program (MpegTSBase * base, MpegTSBaseProgram * program,
-    guint16 pmt_pid, GstMpegtsSection * section, const GstMpegtsPMT * pmt,
-    gboolean initial_program)
+    guint16 pmt_pid, GstMpegtsSection * section, const GstMpegtsPMT * pmt)
 {
   guint i;
   MpegTSBaseClass *klass;
@@ -738,7 +739,8 @@ mpegts_base_activate_program (MpegTSBase * base, MpegTSBaseProgram * program,
   MPEGTS_BIT_SET (base->is_pes, pmt->pcr_pid);
 
   program->active = TRUE;
-  program->initial_program = initial_program;
+  program->initial_program = base->initial_program;
+  base->initial_program = FALSE;
 
   klass = GST_MPEGTS_BASE_GET_CLASS (base);
   if (klass->program_started != NULL)
@@ -855,7 +857,6 @@ mpegts_base_apply_pmt (MpegTSBase * base, GstMpegtsSection * section)
   const GstMpegtsPMT *pmt;
   MpegTSBaseProgram *program, *old_program;
   guint program_number;
-  gboolean initial_program = TRUE;
 
   pmt = gst_mpegts_section_get_pmt (section);
   if (G_UNLIKELY (pmt == NULL)) {
@@ -898,14 +899,12 @@ mpegts_base_apply_pmt (MpegTSBase * base, GstMpegtsSection * section)
     /* Desactivate the old program */
     mpegts_base_deactivate_program (base, old_program);
     mpegts_base_program_unref (old_program);
-    initial_program = FALSE;
   } else
     program = old_program;
 
   /* activate program */
   /* Ownership of pmt_info is given to the program */
-  mpegts_base_activate_program (base, program, section->pid, section, pmt,
-      initial_program);
+  mpegts_base_activate_program (base, program, section->pid, section, pmt);
 
   return TRUE;
 
@@ -1119,6 +1118,7 @@ mpegts_base_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
       mpegts_packetizer_flush (base->packetizer, hard);
       mpegts_base_flush (base, hard);
       gst_segment_init (&base->segment, GST_FORMAT_UNDEFINED);
+      base->initial_program = TRUE;
       base->seen_pat = FALSE;
       break;
     default:

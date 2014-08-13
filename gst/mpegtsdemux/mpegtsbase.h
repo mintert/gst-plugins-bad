@@ -163,6 +163,9 @@ struct _MpegTSBase {
   /* Whether to push data and/or sections to subclasses */
   gboolean push_data;
   gboolean push_section;
+
+  /* Whether a program was added yet */
+  gboolean initial_program;
 };
 
 struct _MpegTSBaseClass {
