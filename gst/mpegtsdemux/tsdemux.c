@@ -1497,6 +1497,31 @@ gst_ts_demux_stream_removed (MpegTSBase * base, MpegTSBaseStream * bstream)
 }
 
 static void
+gst_ts_demux_remove_old_program (GstTSDemux * tsdemux)
+{
+  if (tsdemux->old_program) {
+    GstEvent *event = gst_event_new_eos ();
+    GList *tmp;
+
+    /* close the old program */
+    for (tmp = tsdemux->old_program->stream_list; tmp; tmp = tmp->next) {
+      TSDemuxStream *stream = (TSDemuxStream *) tmp->data;
+      if (stream->pad) {
+        gst_ts_demux_stream_finish (tsdemux, stream);
+        gst_flow_combiner_remove_pad (tsdemux->flowcombiner, stream->pad);
+        GST_DEBUG_OBJECT (tsdemux, "Remove pad %s:%s",
+            GST_DEBUG_PAD_NAME (stream->pad));
+        gst_element_remove_pad (GST_ELEMENT_CAST (tsdemux), stream->pad);
+      }
+    }
+    gst_event_unref (event);
+    TS_DEMUX_PROGRAM (tsdemux->old_program)->state = PROGRAM_STATE_UNEXPOSED;
+    mpegts_base_program_unref (tsdemux->old_program);
+    tsdemux->old_program = NULL;
+  }
+}
+
+static void
 activate_pad_for_stream (GstTSDemux * tsdemux, TSDemuxStream * stream)
 {
   GList *tmp;
@@ -1526,28 +1551,7 @@ activate_pad_for_stream (GstTSDemux * tsdemux, TSDemuxStream * stream)
       TS_DEMUX_PROGRAM (tsdemux->program)->state = PROGRAM_STATE_EXPOSED;
       gst_element_no_more_pads ((GstElement *) tsdemux);
 
-      if (tsdemux->old_program) {
-        GstEvent *event = gst_event_new_eos ();
-
-        /* close the old program */
-        for (tmp = tsdemux->old_program->stream_list; tmp; tmp = tmp->next) {
-          TSDemuxStream *stream = (TSDemuxStream *) tmp->data;
-          if (stream->pad) {
-
-            gst_ts_demux_stream_finish (tsdemux, stream);
-
-            gst_flow_combiner_remove_pad (tsdemux->flowcombiner, stream->pad);
-            GST_DEBUG_OBJECT (tsdemux, "Remove pad %s:%s",
-                GST_DEBUG_PAD_NAME (stream->pad));
-            gst_element_remove_pad (GST_ELEMENT_CAST (tsdemux), stream->pad);
-          }
-        }
-        gst_event_unref (event);
-        TS_DEMUX_PROGRAM (tsdemux->old_program)->state =
-            PROGRAM_STATE_UNEXPOSED;
-        mpegts_base_program_unref (tsdemux->old_program);
-        tsdemux->old_program = NULL;
-      }
+      gst_ts_demux_remove_old_program (tsdemux);
     }
   } else
     GST_WARNING_OBJECT (tsdemux,
