@@ -1447,37 +1447,64 @@ tsdemux_h264_parsing_info_clear (TSDemuxH264ParsingInfos * h264infos)
 }
 
 static void
-gst_ts_demux_stream_finish (GstTSDemux * tsdemux, TSDemuxStream * stream)
+gst_ts_demux_stream_finish_pad (GstPad * pad)
+{
+  GST_DEBUG_OBJECT (pad, "Pushing out EOS");
+  gst_pad_push_event (pad, gst_event_new_eos ());
+  GST_DEBUG_OBJECT (pad, "Deactivating and removing pad");
+  gst_pad_set_active (pad, FALSE);
+}
+
+static void
+gst_ts_demux_stream_finish (GstTSDemux * tsdemux, TSDemuxStream * stream,
+    gboolean eos)
 {
   if (stream->active && gst_pad_is_active (stream->pad)) {
     /* Flush out all data */
     GST_DEBUG_OBJECT (stream->pad, "Flushing out pending data");
     gst_ts_demux_push_pending_data (tsdemux, stream);
 
-    GST_DEBUG_OBJECT (stream->pad, "Pushing out EOS");
-    gst_pad_push_event (stream->pad, gst_event_new_eos ());
-    GST_DEBUG_OBJECT (stream->pad, "Deactivating and removing pad");
-    gst_pad_set_active (stream->pad, FALSE);
-    stream->active = FALSE;
-    stream->need_newsegment = TRUE;
-    stream->discont = TRUE;
+    if (eos) {
+      gst_ts_demux_stream_finish_pad (stream->pad);
+      stream->active = FALSE;
+      stream->need_newsegment = TRUE;
+      stream->discont = TRUE;
+    }
+  }
+}
+
+static void
+gst_ts_demux_clear_pads_limbo (GstTSDemux * tsdemux)
+{
+  while (tsdemux->pads_limbo) {
+    GstPad *pad = tsdemux->pads_limbo->data;
+
+    tsdemux->pads_limbo = g_list_remove (tsdemux->pads_limbo, pad);
+
+    gst_ts_demux_stream_finish_pad (pad);
+    gst_element_remove_pad (GST_ELEMENT_CAST (tsdemux), pad);
+    gst_object_unref (pad);
   }
 }
 
 static void
 gst_ts_demux_stream_removed (MpegTSBase * base, MpegTSBaseStream * bstream)
 {
+  GstTSDemux *tsdemux = GST_TS_DEMUX_CAST (base);
   TSDemuxStream *stream = (TSDemuxStream *) bstream;
 
   if (stream->pad) {
     gst_flow_combiner_remove_pad (GST_TS_DEMUX_CAST (base)->flowcombiner,
         stream->pad);
     if (stream->active) {
-      gst_ts_demux_stream_finish ((GstTSDemux *) base, stream);
+      gst_ts_demux_stream_finish ((GstTSDemux *) base, stream, FALSE);
       GST_DEBUG_OBJECT (stream->pad, "Removing pad");
-      gst_element_remove_pad (GST_ELEMENT_CAST (base), stream->pad);
+      if (gst_pad_is_active (stream->pad)) {
+        tsdemux->pads_limbo = g_list_prepend (tsdemux->pads_limbo, stream->pad);
+      } else {
+        gst_object_unref (stream->pad);
+      }
     }
-    gst_object_unref (stream->pad);
     g_free (stream->stream_id);
     stream->stream_id = NULL;
     if (stream->caps)
@@ -1502,7 +1529,7 @@ gst_ts_demux_remove_old_program (GstTSDemux * tsdemux)
     for (tmp = tsdemux->old_program->stream_list; tmp; tmp = tmp->next) {
       TSDemuxStream *stream = (TSDemuxStream *) tmp->data;
       if (stream->pad) {
-        gst_ts_demux_stream_finish (tsdemux, stream);
+        gst_ts_demux_stream_finish (tsdemux, stream, TRUE);
         gst_flow_combiner_remove_pad (tsdemux->flowcombiner, stream->pad);
         GST_DEBUG_OBJECT (tsdemux, "Remove pad %s:%s",
             GST_DEBUG_PAD_NAME (stream->pad));
@@ -1546,6 +1573,7 @@ activate_pad_for_stream (GstTSDemux * tsdemux, TSDemuxStream * stream)
       TS_DEMUX_PROGRAM (tsdemux->program)->state = PROGRAM_STATE_EXPOSED;
       gst_element_no_more_pads ((GstElement *) tsdemux);
 
+      gst_ts_demux_clear_pads_limbo (tsdemux);
       gst_ts_demux_remove_old_program (tsdemux);
     }
   } else
@@ -1632,6 +1660,8 @@ gst_ts_demux_program_stopped (MpegTSBase * base, MpegTSBaseProgram * program)
     mpegts_base_program_unref (demux->program);
     demux->program = NULL;
     demux->program_number = -1;
+    GST_DEBUG_OBJECT (demux, "Current program stopped");
+    gst_event_replace (&demux->segment_event, NULL);
   }
 }
 
@@ -2050,7 +2080,7 @@ calculate_and_push_newsegment (GstTSDemux * demux, TSDemuxStream * stream)
     if (demux->segment.rate > 0) {
       demux->segment.start = firstts;
 
-      if (GST_CLOCK_TIME_IS_VALID (demux->segment.stop) )
+      if (GST_CLOCK_TIME_IS_VALID (demux->segment.stop))
         demux->segment.stop += firstts - demux->segment.start;
       demux->segment.position = firstts;
       demux->segment.base += segbase;
@@ -2324,6 +2354,8 @@ gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
   GstTSDemux *demux = GST_TS_DEMUX_CAST (base);
   TSDemuxStream *stream = NULL;
   GstFlowReturn res = GST_FLOW_OK;
+
+  GST_ERROR ("TSPUSH");
 
   GST_OBJECT_LOCK (base);
   if (G_UNLIKELY ((demux->requested_program_number == -1 &&
