@@ -78,7 +78,7 @@ gchar *
 gst_media_presentation_close_document (xmlTextWriterPtr writer,
     xmlBufferPtr buf)
 {
-  gchar *mdp_str;
+  gchar *mpd_str;
 
   /* End document */
   if (xmlTextWriterEndDocument (writer) < 0) {
@@ -86,12 +86,12 @@ gst_media_presentation_close_document (xmlTextWriterPtr writer,
     return NULL;
   }
 
-  mdp_str = g_strdup ((gchar *) buf->content);
+  mpd_str = g_strdup ((gchar *) buf->content);
   if (writer != NULL)
     xmlFreeTextWriter (writer);
   if (buf != NULL)
     xmlBufferFree (buf);
-  return mdp_str;
+  return mpd_str;
 }
 
 gboolean

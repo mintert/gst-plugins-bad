@@ -27,7 +27,7 @@
 #include <glib.h>
 #include <gst/gst.h>
 #include <gst/baseadaptive/gststreamsmanager.h>
-#include "mdp/gstmediapresentation.h"
+#include "mpd/gstmediapresentation.h"
 
 G_BEGIN_DECLS
 #define GST_TYPE_DASH_MANAGER \
@@ -58,7 +58,7 @@ struct _GstDashManager
 {
   GstStreamsManager parent;
 
-  GstMediaPresentation *mdp;
+  GstMediaPresentation *mpd;
   guint64 min_buffer_time;
 };
 

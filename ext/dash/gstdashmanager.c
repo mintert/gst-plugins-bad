@@ -23,12 +23,12 @@
 #include <gst/baseadaptive/gstfragment.h>
 
 #include "gstdashmanager.h"
-#include "mdp/gstmediapresentation.h"
+#include "mpd/gstmediapresentation.h"
 
 #define ISOFF_HEADERS_EXTENSION ".m4v"
 #define ISOFF_FRAGMENT_EXTENSION ".m4s"
 #define MPEGTS_FRAGMENT_EXTENSION ".mpegts"
-#define MDP_EXTENSION ".mdp"
+#define MDP_EXTENSION ".mpd"
 
 static void gst_dash_manager_finalize (GObject * gobject);
 
@@ -84,7 +84,7 @@ gst_dash_manager_init (GstDashManager * manager)
   base_manager->is_live = FALSE;
   base_manager->finished = FALSE;
   base_manager->window_size = GST_CLOCK_TIME_NONE;
-  manager->mdp = NULL;
+  manager->mpd = NULL;
 }
 
 static void
@@ -92,9 +92,9 @@ gst_dash_manager_finalize (GObject * gobject)
 {
   GstDashManager *manager = GST_DASH_MANAGER (gobject);
 
-  if (manager->mdp != NULL) {
-    gst_media_presentation_free (manager->mdp);
-    manager->mdp = NULL;
+  if (manager->mpd != NULL) {
+    gst_media_presentation_free (manager->mpd);
+    manager->mpd = NULL;
   }
 
   G_OBJECT_CLASS (gst_dash_manager_parent_class)->finalize (gobject);
@@ -108,7 +108,7 @@ gst_dash_manager_new (gboolean is_live, gboolean chunked,
 
 
   manager = GST_DASH_MANAGER (g_object_new (GST_TYPE_DASH_MANAGER, NULL));
-  manager->mdp = gst_media_presentation_new (is_live ?
+  manager->mpd = gst_media_presentation_new (is_live ?
       MEDIA_PRESENTATION_TYPE_LIVE : MEDIA_PRESENTATION_TYPE_ONDEMAND,
       !chunked, min_buffer_time);
   manager->min_buffer_time = min_buffer_time;
@@ -184,7 +184,7 @@ gst_dash_manager_add_stream (GstStreamsManager * b_manager, GstPad * pad,
   pad_name = gst_pad_get_name (pad);
   pad_caps = gst_pad_get_current_caps (pad);
   mime_type = gst_structure_get_name (gst_caps_get_structure (pad_caps, 0));
-  ret = gst_media_presentation_add_stream (manager->mdp, type,
+  ret = gst_media_presentation_add_stream (manager->mpd, type,
       pad_name, mime_type, width, height, par_n, par_d, framerate,
       NULL, samplerate, bitrate, lang, b_manager->fragment_duration);
   g_free (pad_name);
@@ -275,7 +275,7 @@ gst_dash_manager_add_headers (GstStreamsManager * b_manager,
 
   pad_name = gst_pad_get_name (pad);
   meta = gst_buffer_get_fragment_meta (fragment);
-  ret = gst_media_presentation_set_init_segment (manager->mdp, pad_name,
+  ret = gst_media_presentation_set_init_segment (manager->mpd, pad_name,
       meta->name, GST_BUFFER_OFFSET (fragment), gst_buffer_get_size (fragment));
   g_free (pad_name);
 
@@ -302,7 +302,7 @@ gst_dash_manager_add_fragment (GstStreamsManager * b_manager,
   }
 
   meta = gst_buffer_get_fragment_meta (fragment);
-  ret = gst_media_presentation_add_media_segment (manager->mdp,
+  ret = gst_media_presentation_add_media_segment (manager->mpd,
       pad_name, meta->name, meta->index, GST_BUFFER_PTS (fragment),
       GST_BUFFER_DURATION (fragment), GST_BUFFER_OFFSET (fragment),
       gst_buffer_get_size (fragment));
@@ -317,11 +317,11 @@ gst_dash_manager_clear (GstStreamsManager * b_manager)
   GstDashManager *manager;
 
   manager = GST_DASH_MANAGER (b_manager);
-  if (manager->mdp != NULL) {
-    gst_media_presentation_free (manager->mdp);
+  if (manager->mpd != NULL) {
+    gst_media_presentation_free (manager->mpd);
   }
 
-  manager->mdp = gst_media_presentation_new (MEDIA_PRESENTATION_TYPE_ONDEMAND,
+  manager->mpd = gst_media_presentation_new (MEDIA_PRESENTATION_TYPE_ONDEMAND,
       b_manager->is_live, manager->min_buffer_time);
 }
 
@@ -330,7 +330,7 @@ gst_dash_manager_render (GstStreamsManager * b_manager, GstPad * pad,
     GstMediaRepFile ** rep_file)
 {
   GstDashManager *manager;
-  gchar *filename, *filepath, *mdp;
+  gchar *filename, *filepath, *mpd;
   GFile *file;
   GList *base_urls = NULL;
   gboolean ret = TRUE;
@@ -339,15 +339,15 @@ gst_dash_manager_render (GstStreamsManager * b_manager, GstPad * pad,
 
   /* Update base url */
   base_urls = g_list_append (base_urls, g_strdup (b_manager->base_url));
-  gst_media_presentation_set_base_urls (manager->mdp, base_urls);
+  gst_media_presentation_set_base_urls (manager->mpd, base_urls);
 
   filename = g_strdup_printf ("%s%s", b_manager->title, MDP_EXTENSION);
   filepath = g_build_filename (b_manager->output_directory, filename, NULL);
   file = g_file_new_for_path (filepath);
-  mdp = gst_media_presentation_render (manager->mdp);
-  if (mdp != NULL) {
+  mpd = gst_media_presentation_render (manager->mpd);
+  if (mpd != NULL) {
     *rep_file =
-        gst_media_rep_file_new (gst_media_presentation_render (manager->mdp),
+        gst_media_rep_file_new (gst_media_presentation_render (manager->mpd),
         file);
   } else {
     ret = FALSE;

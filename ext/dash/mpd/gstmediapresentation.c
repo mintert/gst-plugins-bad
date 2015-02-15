@@ -119,19 +119,19 @@ gst_media_presentation_format_mime_type (GstMediaPresentation * mpd,
 }
 
 static void
-gst_media_presentation_add_profile (GstMediaPresentation * mdp,
+gst_media_presentation_add_profile (GstMediaPresentation * mpd,
     const gchar * mime_type)
 {
   const gchar *profile = NULL;
 
   if (!g_strcmp0 (mime_type, "video/quicktime")) {
-    if (mdp->type == MEDIA_PRESENTATION_TYPE_LIVE) {
+    if (mpd->type == MEDIA_PRESENTATION_TYPE_LIVE) {
       profile = PROFILE_ISOFF_LIVE;
     } else {
       profile = PROFILE_ISOFF_ONDEMAND;
     }
   } else if (!g_strcmp0 (mime_type, "video/mpegts")) {
-    if (mdp->type == MEDIA_PRESENTATION_TYPE_LIVE) {
+    if (mpd->type == MEDIA_PRESENTATION_TYPE_LIVE) {
       profile = PROFILE_MPEGTS_ONDEMAND;
     } else {
       profile = PROFILE_MPEGTS_LIVE;
@@ -141,9 +141,9 @@ gst_media_presentation_add_profile (GstMediaPresentation * mdp,
   if (profile == NULL)
     return;
 
-  if (g_list_find_custom (mdp->profiles, profile,
+  if (g_list_find_custom (mpd->profiles, profile,
           (GCompareFunc) g_strcmp0) == NULL) {
-    mdp->profiles = g_list_append (mdp->profiles, g_strdup (profile));
+    mpd->profiles = g_list_append (mpd->profiles, g_strdup (profile));
   }
 }
 

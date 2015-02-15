@@ -7,13 +7,13 @@ libgstdash_la_SOURCES =				\
 	gstisoff.c				\
         gstdashsink.c				\
         gstdashmanager.c			\
-        mdp/gstperiod.c				\
-        mdp/gstadaptationset.c			\
-        mdp/gstmediacommon.c			\
-        mdp/gstmediapresentation.c		\
-        mdp/gstrepresentation.c			\
-        mdp/gstsegmentlist.c			\
-        mdp/gstxmlhelper.c			\
+        mpd/gstperiod.c				\
+        mpd/gstadaptationset.c			\
+        mpd/gstmediacommon.c			\
+        mpd/gstmediapresentation.c		\
+        mpd/gstrepresentation.c			\
+        mpd/gstsegmentlist.c			\
+        mpd/gstxmlhelper.c			\
 	gstplugin.c
 
 # headers we need but don't want installed
@@ -23,13 +23,13 @@ noinst_HEADERS =        \
 	gstisoff.h	\
         gstdashsink.h	\
         gstdashmanager.h \
-        mdp/gstperiod.h	\
-        mdp/gstadaptationset.h \
-        mdp/gstmediacommon.h \
-        mdp/gstmediapresentation.h \
-        mdp/gstrepresentation.h \
-        mdp/gstsegmentlist.h \
-        mdp/gstxmlhelper.h \
+        mpd/gstperiod.h	\
+        mpd/gstadaptationset.h \
+        mpd/gstmediacommon.h \
+        mpd/gstmediapresentation.h \
+        mpd/gstrepresentation.h \
+        mpd/gstsegmentlist.h \
+        mpd/gstxmlhelper.h \
 	gstdash_debug.h
 
 # compiler and linker flags used to compile this plugin, set in configure.ac
