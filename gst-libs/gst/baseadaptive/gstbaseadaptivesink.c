@@ -888,7 +888,8 @@ gst_base_adaptive_sink_chain (GstPad * pad, GstObject * element,
     index = pad_data->new_fragment_index;
     offset = 0;
 
-    if (pad_data->fragment != NULL) {
+    if (pad_data->fragment != NULL
+        && gst_buffer_get_size (pad_data->fragment) > 0) {
       /* Parse headers for this stream and add it to the media manager */
       if (G_UNLIKELY (!pad_data->parsed)) {
         if (!gst_base_adaptive_process_new_stream (sink, pad, pad_data)) {
