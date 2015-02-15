@@ -1143,14 +1143,20 @@ gst_base_adaptive_sink_write_headers (GstBaseAdaptiveSink * sink,
   GstMapInfo map;
   GError *error = NULL;
 
-  pad_data->cancellable = cancellable;
+  if (pad_data->streamheaders) {
+    pad_data->cancellable = cancellable;
 
-  gst_buffer_map (pad_data->streamheaders, &map, GST_MAP_READ);
-  g_output_stream_write ((GOutputStream *) stream,
-      map.data, map.size, pad_data->cancellable, &error);
-  gst_buffer_unmap (pad_data->streamheaders, &map);
+    gst_buffer_map (pad_data->streamheaders, &map, GST_MAP_READ);
+    g_output_stream_write ((GOutputStream *) stream,
+        map.data, map.size, pad_data->cancellable, &error);
+    gst_buffer_unmap (pad_data->streamheaders, &map);
 
-  pad_data->cancellable = NULL;
+    pad_data->cancellable = NULL;
+  } else {
+    error = g_error_new (GST_STREAM_ERROR, GST_STREAM_ERROR_MUX, "Stream "
+        "headers not found");
+  }
+
   return error;
 }
 
