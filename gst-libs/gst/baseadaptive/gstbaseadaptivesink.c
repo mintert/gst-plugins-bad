@@ -1042,7 +1042,7 @@ gst_base_adaptive_sink_write_element (GstBaseAdaptiveSink * sink,
     goto open_error;
   }
 
-  if (write_func (sink, data, stream, cancellable) != NULL)
+  if ((error = write_func (sink, data, stream, cancellable)) != NULL)
     goto write_error;
 
   /* Flush and close file */
