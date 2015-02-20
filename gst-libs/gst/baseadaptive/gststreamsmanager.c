@@ -239,47 +239,39 @@ gst_streams_manager_add_fragment (GstStreamsManager * man,
 
 void
 gst_streams_manager_set_output_directory (GstStreamsManager * man,
-    gchar * output_dir)
+    const gchar * output_dir)
 {
   g_return_if_fail (GST_IS_STREAMS_MANAGER (man));
 
-  if (man->output_directory != NULL)
-    g_free (man->output_directory);
-
+  g_free (man->output_directory);
   man->output_directory = g_strdup (output_dir);
 }
 
 void
-gst_streams_manager_set_base_url (GstStreamsManager * man, gchar * url)
+gst_streams_manager_set_base_url (GstStreamsManager * man, const gchar * url)
 {
   g_return_if_fail (GST_IS_STREAMS_MANAGER (man));
 
-  if (man->base_url != NULL)
-    g_free (man->base_url);
-
+  g_free (man->base_url);
   man->base_url = g_strdup (url);
 }
 
 void
-gst_streams_manager_set_title (GstStreamsManager * man, gchar * title)
+gst_streams_manager_set_title (GstStreamsManager * man, const gchar * title)
 {
   g_return_if_fail (GST_IS_STREAMS_MANAGER (man));
 
-  if (man->title != NULL)
-    g_free (man->title);
-
+  g_free (man->title);
   man->title = g_strdup (title);
 }
 
 void
 gst_streams_manager_set_fragment_prefix (GstStreamsManager * man,
-    gchar * prefix)
+    const gchar * prefix)
 {
   g_return_if_fail (GST_IS_STREAMS_MANAGER (man));
 
-  if (man->fragment_prefix != NULL)
-    g_free (man->fragment_prefix);
-
+  g_free (man->fragment_prefix);
   man->fragment_prefix = g_strdup (prefix);
 }
 

@@ -169,19 +169,19 @@ gboolean          gst_streams_manager_render              (GstStreamsManager * m
                                                            GstMediaRepFile ** file);
 
 void              gst_streams_manager_set_base_url        (GstStreamsManager * man,
-                                                           gchar * base_url);
+                                                           const gchar * base_url);
 
 void              gst_streams_manager_set_title           (GstStreamsManager * man,
-                                                           gchar * title);
+                                                           const gchar * title);
 
 void              gst_streams_manager_clear               (GstStreamsManager * man);
 
 
 void              gst_streams_manager_set_output_directory (GstStreamsManager * man,
-                                                            gchar * output_directory);
+                                                            const gchar * output_directory);
 
 void              gst_streams_manager_set_fragment_prefix  (GstStreamsManager * man,
-                                                            gchar * prefix);
+                                                            const gchar * prefix);
 
 GstMediaRepFile * gst_media_rep_file_new                   (gchar *content,
                                                             GFile * file);

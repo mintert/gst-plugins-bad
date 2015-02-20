@@ -77,9 +77,9 @@ gst_dash_manager_init (GstDashManager * manager)
   GstStreamsManager *base_manager;
 
   base_manager = GST_STREAMS_MANAGER (manager);
-  gst_streams_manager_set_base_url (base_manager, g_strdup ("./"));
-  gst_streams_manager_set_title (base_manager, g_strdup ("dash"));
-  gst_streams_manager_set_fragment_prefix (base_manager, g_strdup ("segment"));
+  gst_streams_manager_set_base_url (base_manager, "./");
+  gst_streams_manager_set_title (base_manager, "dash");
+  gst_streams_manager_set_fragment_prefix (base_manager, "segment");
   base_manager->chunked = TRUE;
   base_manager->is_live = FALSE;
   base_manager->finished = FALSE;
