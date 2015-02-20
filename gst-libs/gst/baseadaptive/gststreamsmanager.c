@@ -76,6 +76,11 @@ gst_streams_manager_finalize (GObject * gobject)
     man->fragment_prefix = NULL;
   }
 
+  if (man->output_directory != NULL) {
+    g_free (man->output_directory);
+    man->output_directory = NULL;
+  }
+
   g_mutex_clear (&man->lock);
 
   G_OBJECT_CLASS (gst_streams_manager_parent_class)->finalize (gobject);
