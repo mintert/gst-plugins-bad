@@ -401,7 +401,7 @@ gst_base_adaptive_sink_class_init (GstBaseAdaptiveSinkClass * klass)
   /**
    * GstAppSink::new-fragment:
    * @sink: the sink element that emited the signal
-   * @fragment: the #GstFragment that was created
+   * @fragment: the #GstAdaptiveFragment that was created
    *
    * This signal gets emitted when a new fragment has been created.
    *
@@ -843,11 +843,11 @@ gst_base_adaptive_sink_create_empty_fragment (GstBaseAdaptiveSink * sink,
     GstBaseAdaptivePadData * pad_data, GstClockTime start_ts,
     guint64 offset, guint index)
 {
-  GstFragmentMeta *meta;
+  GstAdaptiveFragmentMeta *meta;
   gchar *fragment_name;
 
   /* Create a new empty fragment */
-  pad_data->fragment = gst_fragment_new ();
+  pad_data->fragment = gst_adaptive_fragment_new ();
 
   /* Fill the fragment's metadata */
   meta = gst_buffer_get_fragment_meta (pad_data->fragment);
@@ -857,7 +857,7 @@ gst_base_adaptive_sink_create_empty_fragment (GstBaseAdaptiveSink * sink,
 
   fragment_name = gst_streams_manager_fragment_name (sink->streams_manager,
       pad_data->pad, index);
-  gst_fragment_set_name (pad_data->fragment, fragment_name);
+  gst_adaptive_fragment_set_name (pad_data->fragment, fragment_name);
 
   GST_DEBUG_OBJECT (sink, "Created empty fragment");
 }
@@ -947,7 +947,7 @@ gst_base_adaptive_sink_chain (GstPad * pad, GstObject * element,
   if (GST_CLOCK_TIME_IS_VALID (GST_BUFFER_DURATION (buffer)))
     GST_BUFFER_DURATION (pad_data->fragment) += GST_BUFFER_DURATION (buffer);
 
-  gst_fragment_add_buffer (pad_data->fragment, buffer);
+  gst_adaptive_fragment_add_buffer (pad_data->fragment, buffer);
 
 quit:
   {
@@ -1178,17 +1178,17 @@ gst_base_adaptive_sink_set_stream_headers (GstBaseAdaptiveSink * sink,
     GstPad * pad, GstBaseAdaptivePadData * pad_data)
 {
   GstBuffer *headers_fragment;
-  GstFragmentMeta *meta;
+  GstAdaptiveFragmentMeta *meta;
   gboolean ret = TRUE;
 
   if (pad_data->streamheaders == NULL)
     return TRUE;
 
   /* Create a new fragment with the stream headers */
-  headers_fragment = gst_fragment_new ();
-  gst_fragment_set_name (headers_fragment,
+  headers_fragment = gst_adaptive_fragment_new ();
+  gst_adaptive_fragment_set_name (headers_fragment,
       gst_streams_manager_headers_name (sink->streams_manager, pad));
-  gst_fragment_add_buffer (headers_fragment,
+  gst_adaptive_fragment_add_buffer (headers_fragment,
       gst_buffer_ref (pad_data->streamheaders));
   meta = gst_buffer_get_fragment_meta (headers_fragment);
   GST_BUFFER_OFFSET (headers_fragment) = 0;
@@ -1461,7 +1461,7 @@ gst_base_adaptive_sink_close_fragment (GstBaseAdaptiveSink * sink,
     GstBaseAdaptivePadData * pad_data, GstClockTime stop_ts)
 {
   GstClockTime duration;
-  GstFragmentMeta *meta;
+  GstAdaptiveFragmentMeta *meta;
   GList *old_files;
   GstMediaRepFile *rep_file;
   GstFlowReturn ret = GST_FLOW_OK;

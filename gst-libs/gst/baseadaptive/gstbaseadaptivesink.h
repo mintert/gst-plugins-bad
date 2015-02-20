@@ -27,7 +27,7 @@
 #include <gio/gio.h>
 #include <errno.h>
 
-#include "gstfragment.h"
+#include "gstadaptivefragment.h"
 #include "gststreamsmanager.h"
 
 G_BEGIN_DECLS

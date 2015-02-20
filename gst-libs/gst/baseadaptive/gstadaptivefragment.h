@@ -19,8 +19,8 @@
  * Boston, MA 02111-1307, USA.
  */
 
-#ifndef __GSTFRAGMENT_H__
-#define __GSTFRAGMENT_H__
+#ifndef __GSTADAPTIVEFRAGMENT_H__
+#define __GSTADAPTIVEFRAGMENT_H__
 
 #include <glib-object.h>
 #include <gio/gio.h>
@@ -28,13 +28,13 @@
 
 G_BEGIN_DECLS
 
-#define GST_FRAGMENT_META_API_TYPE (gst_fragment_meta_api_get_type())
+#define GST_ADAPTIVE_FRAGMENT_META_API_TYPE (gst_adaptive_fragment_meta_api_get_type())
 #define gst_buffer_get_fragment_meta(b) \
-  ((GstFragmentMeta*)gst_buffer_get_meta((b), GST_FRAGMENT_META_API_TYPE))
+  ((GstAdaptiveFragmentMeta*)gst_buffer_get_meta((b), GST_ADAPTIVE_FRAGMENT_META_API_TYPE))
 
-typedef struct _GstFragmentMeta GstFragmentMeta;
+typedef struct _GstAdaptiveFragmentMeta GstAdaptiveFragmentMeta;
 
-struct _GstFragmentMeta
+struct _GstAdaptiveFragmentMeta
 {
   GstMeta parent;
 
@@ -47,12 +47,12 @@ struct _GstFragmentMeta
   GFile *file;                  /* File where this fragment is stored in disk */
 };
 
-GType gst_fragment_meta_api_get_type (void);
+GType gst_adaptive_fragment_meta_api_get_type (void);
 
-gboolean gst_fragment_add_buffer (GstBuffer *fragment, GstBuffer *buffer);
-void gst_fragment_set_name (GstBuffer *buffer, gchar *name);
-void gst_fragment_set_file (GstBuffer *fragment, GFile *file);
-GstBuffer * gst_fragment_new (void);
+gboolean gst_adaptive_fragment_add_buffer (GstBuffer *fragment, GstBuffer *buffer);
+void gst_adaptive_fragment_set_name (GstBuffer *buffer, gchar *name);
+void gst_adaptive_fragment_set_file (GstBuffer *fragment, GFile *file);
+GstBuffer * gst_adaptive_fragment_new (void);
 
 G_END_DECLS
-#endif /* __GSTFRAGMENT_H__ */
+#endif /* __GSTADAPTIVEFRAGMENT_H__ */

@@ -2,7 +2,7 @@
  * Copyright (C) 2011 Flumotion S.L. <devteam@flumotion.com>
  * Copyright (C) 2011 Andoni Morales Alastruey <ylatuya@gmail.com>
  *
- * gstfragment.c:
+ * gstadaptivefragment.c:
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,35 +22,38 @@
 
 #include <glib.h>
 #include <string.h>
-#include "gstfragment.h"
+#include "gstadaptivefragment.h"
 
-static gboolean gst_fragment_meta_init (GstFragmentMeta * meta, gpointer params,
+static gboolean gst_adaptive_fragment_meta_init (GstAdaptiveFragmentMeta * meta,
+    gpointer params, GstBuffer * buffer);
+static void gst_adaptive_fragment_meta_free (GstAdaptiveFragmentMeta * meta,
     GstBuffer * buffer);
-static void gst_fragment_meta_free (GstFragmentMeta * meta, GstBuffer * buffer);
 
 GType
-gst_fragment_meta_api_get_type (void)
+gst_adaptive_fragment_meta_api_get_type (void)
 {
   static volatile GType type;
   static const gchar *tags[] = { "memory", NULL };
 
   if (g_once_init_enter (&type)) {
-    GType _type = gst_meta_api_type_register ("GstFragmentMetaAPI", tags);
+    GType _type =
+        gst_meta_api_type_register ("GstAdaptiveFragmentMetaAPI", tags);
     g_once_init_leave (&type, _type);
   }
   return type;
 }
 
 static const GstMetaInfo *
-gst_fragment_meta_get_info (void)
+gst_adaptive_fragment_meta_get_info (void)
 {
   static const GstMetaInfo *fragment_meta_info = NULL;
 
   if (g_once_init_enter (&fragment_meta_info)) {
-    const GstMetaInfo *meta = gst_meta_register (GST_FRAGMENT_META_API_TYPE,
-        "GstFragmentMeta", sizeof (GstFragmentMeta),
-        (GstMetaInitFunction) gst_fragment_meta_init,
-        (GstMetaFreeFunction) gst_fragment_meta_free,
+    const GstMetaInfo *meta =
+        gst_meta_register (GST_ADAPTIVE_FRAGMENT_META_API_TYPE,
+        "GstAdaptiveFragmentMeta", sizeof (GstAdaptiveFragmentMeta),
+        (GstMetaInitFunction) gst_adaptive_fragment_meta_init,
+        (GstMetaFreeFunction) gst_adaptive_fragment_meta_free,
         (GstMetaTransformFunction) NULL);
     g_once_init_leave (&fragment_meta_info, meta);
   }
@@ -58,8 +61,8 @@ gst_fragment_meta_get_info (void)
 }
 
 static gboolean
-gst_fragment_meta_init (GstFragmentMeta * meta, gpointer params,
-    GstBuffer * buffer)
+gst_adaptive_fragment_meta_init (GstAdaptiveFragmentMeta * meta,
+    gpointer params, GstBuffer * buffer)
 {
   meta->download_start_time = g_get_real_time ();
   meta->index = 0;
@@ -72,7 +75,8 @@ gst_fragment_meta_init (GstFragmentMeta * meta, gpointer params,
 }
 
 static void
-gst_fragment_meta_free (GstFragmentMeta * meta, GstBuffer * buffer)
+gst_adaptive_fragment_meta_free (GstAdaptiveFragmentMeta * meta,
+    GstBuffer * buffer)
 {
   if (meta->name != NULL) {
     g_free (meta->name);
@@ -85,19 +89,19 @@ gst_fragment_meta_free (GstFragmentMeta * meta, GstBuffer * buffer)
 }
 
 GstBuffer *
-gst_fragment_new (void)
+gst_adaptive_fragment_new (void)
 {
   GstBuffer *buf;
 
   buf = gst_buffer_new ();
-  gst_buffer_add_meta (buf, gst_fragment_meta_get_info (), NULL);
+  gst_buffer_add_meta (buf, gst_adaptive_fragment_meta_get_info (), NULL);
   return buf;
 }
 
-static GstFragmentMeta *
-gst_fragment_get_meta (GstBuffer * buffer)
+static GstAdaptiveFragmentMeta *
+gst_adaptive_fragment_get_meta (GstBuffer * buffer)
 {
-  GstFragmentMeta *meta;
+  GstAdaptiveFragmentMeta *meta;
 
   meta = gst_buffer_get_fragment_meta (buffer);
   if (!meta) {
@@ -109,11 +113,11 @@ gst_fragment_get_meta (GstBuffer * buffer)
 }
 
 void
-gst_fragment_set_name (GstBuffer * fragment, gchar * name)
+gst_adaptive_fragment_set_name (GstBuffer * fragment, gchar * name)
 {
-  GstFragmentMeta *meta;
+  GstAdaptiveFragmentMeta *meta;
 
-  meta = gst_fragment_get_meta (fragment);
+  meta = gst_adaptive_fragment_get_meta (fragment);
   if (!meta) {
     return;
   }
@@ -124,11 +128,11 @@ gst_fragment_set_name (GstBuffer * fragment, gchar * name)
 }
 
 gboolean
-gst_fragment_add_buffer (GstBuffer * fragment, GstBuffer * buffer)
+gst_adaptive_fragment_add_buffer (GstBuffer * fragment, GstBuffer * buffer)
 {
-  GstFragmentMeta *meta;
+  GstAdaptiveFragmentMeta *meta;
 
-  meta = gst_fragment_get_meta (fragment);
+  meta = gst_adaptive_fragment_get_meta (fragment);
   if (!meta) {
     return FALSE;
   }
@@ -142,11 +146,11 @@ gst_fragment_add_buffer (GstBuffer * fragment, GstBuffer * buffer)
 }
 
 void
-gst_fragment_set_file (GstBuffer * fragment, GFile * file)
+gst_adaptive_fragment_set_file (GstBuffer * fragment, GFile * file)
 {
-  GstFragmentMeta *meta;
+  GstAdaptiveFragmentMeta *meta;
 
-  meta = gst_fragment_get_meta (fragment);
+  meta = gst_adaptive_fragment_get_meta (fragment);
   if (!meta) {
     return;
   }

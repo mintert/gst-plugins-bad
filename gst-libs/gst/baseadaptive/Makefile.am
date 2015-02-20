@@ -12,7 +12,7 @@ CLEANFILES = $(BUILT_SOURCES)
 lib_LTLIBRARIES = libgstbaseadaptive-@GST_API_VERSION@.la
 
 libgstbaseadaptive_@GST_API_VERSION@_la_SOURCES = \
-        gstfragment.c \
+        gstadaptivefragment.c \
         gststreamsmanager.c \
         gstbaseadaptivesink.c \
 	$(built_sources)
@@ -20,7 +20,7 @@ libgstbaseadaptive_@GST_API_VERSION@_la_SOURCES = \
 libgstbaseadaptive_@GST_API_VERSION@includedir = $(includedir)/gstreamer-@GST_API_VERSION@/gst/baseadaptive
 libgstbaseadaptive_@GST_API_VERSION@include_HEADERS = \
         gstadaptive.h \
-        gstfragment.h \
+        gstadaptivefragment.h \
         gststreamsmanager.h \
         gstbaseadaptivesink.h \
 	$(built_headers)

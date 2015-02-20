@@ -20,7 +20,7 @@
  * Boston, MA 02111-1307, USA.
  */
 
-#include <gst/baseadaptive/gstfragment.h>
+#include <gst/baseadaptive/gstadaptivefragment.h>
 
 #include "gstdashmanager.h"
 #include "mpd/gstmediapresentation.h"
@@ -267,7 +267,7 @@ gst_dash_manager_add_headers (GstStreamsManager * b_manager,
     GstPad * pad, GstBuffer * fragment)
 {
   GstDashManager *manager;
-  GstFragmentMeta *meta;
+  GstAdaptiveFragmentMeta *meta;
   gchar *pad_name;
   gboolean ret;
 
@@ -288,7 +288,7 @@ gst_dash_manager_add_fragment (GstStreamsManager * b_manager,
     GList ** removed_fragments)
 {
   GstDashManager *manager;
-  GstFragmentMeta *meta;
+  GstAdaptiveFragmentMeta *meta;
   gchar *pad_name;
   gboolean ret;
 

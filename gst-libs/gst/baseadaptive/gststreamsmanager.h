@@ -32,7 +32,7 @@
 #include <glib.h>
 #include <gst/gst.h>
 #include <gst/pbutils/pbutils.h>
-#include "gstfragment.h"
+#include "gstadaptivefragment.h"
 
 G_BEGIN_DECLS
 #define GST_TYPE_STREAMS_MANAGER \
