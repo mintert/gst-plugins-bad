@@ -469,11 +469,6 @@ gst_base_adaptive_sink_finalize (GObject * object)
     sink->md_name = NULL;
   }
 
-  if (sink->output_directory != NULL) {
-    g_free (sink->output_directory);
-    sink->output_directory = NULL;
-  }
-
   if (sink->fragment_prefix != NULL) {
     g_free (sink->fragment_prefix);
     sink->fragment_prefix = NULL;
