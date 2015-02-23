@@ -130,6 +130,12 @@ else
 GSM_DIR=
 endif
 
+if USE_HDS
+HDS_DIR=hds
+else
+HDS_DIR=
+endif
+
 if USE_KATE
 KATE_DIR=kate
 else
@@ -437,6 +443,7 @@ SUBDIRS=\
 	$(GSETTINGS_DIR) \
 	$(GSM_DIR) \
 	$(G729_DIR) \
+	$(HDS_DIR) \
 	$(KATE_DIR) \
 	$(LADSPA_DIR) \
 	$(LV2_DIR) \

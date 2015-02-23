@@ -2081,6 +2081,16 @@ AG_GST_CHECK_FEATURE(FLUIDSYNTH, [fluidsynth], fluidsynth, [
   ])
 ])
 
+dnl **** HDS ****
+translit(dnm, m, l) AM_CONDITIONAL(USE_HDS, true)
+AG_GST_CHECK_FEATURE(HDS, [HDS plug-in], hds, [
+  PKG_CHECK_MODULES(LIBXML2, libxml-2.0 >= 2.4, [HAVE_LIBXML2="yes"
+    HAVE_HDS="yes"], [HAVE_LIBXML2="no"
+    HAVE_HDS="no"])
+  AC_SUBST(LIBXML2_CFLAGS)
+  AC_SUBST(LIBXML2_LIBS)
+])
+
 dnl *** kate ***
 translit(dnm, m, l) AM_CONDITIONAL(USE_KATE, true)
 AG_GST_CHECK_FEATURE(KATE, [Kate], kate, [
@@ -3281,6 +3291,7 @@ ext/faad/Makefile
 ext/flite/Makefile
 ext/fluidsynth/Makefile
 ext/gsm/Makefile
+ext/hds/Makefile
 ext/hls/Makefile
 ext/kate/Makefile
 ext/ladspa/Makefile
