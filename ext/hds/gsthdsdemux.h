@@ -27,6 +27,7 @@
 
 #include <gst/gst.h>
 #include <gst/adaptivedemux/gstadaptivedemux.h>
+#include "gsthdsclient.h"
 
 G_BEGIN_DECLS
 #define GST_TYPE_HDS_DEMUX \
@@ -54,6 +55,8 @@ struct _GstHdsDemuxStream
 struct _GstHdsDemux
 {
   GstAdaptiveDemux parent;
+
+  GstHdsClient *client;
 };
 
 struct _GstHdsDemuxClass

@@ -149,6 +149,24 @@ gst_hds_demux_get_duration (GstAdaptiveDemux * ademux)
 static gboolean
 gst_hds_demux_process_manifest (GstAdaptiveDemux * demux, GstBuffer * buf)
 {
+  GstHdsDemux *hdsdemux = GST_HDS_DEMUX_CAST (demux);
+  gchar *manifest;
+  GstMapInfo mapinfo;
+
+  if (hdsdemux->client)
+    gst_hds_client_free (hdsdemux->client);
+  hdsdemux->client = gst_hds_client_new ();
+
+  if (gst_buffer_map (buf, &mapinfo, GST_MAP_READ)) {
+    manifest = (gchar *) mapinfo.data;
+    if (gst_hds_client_parse_manifest (hdsdemux->client, manifest,
+            mapinfo.size)) {
+    }
+    gst_buffer_unmap (buf, &mapinfo);
+  } else {
+    GST_WARNING_OBJECT (demux, "Failed to map manifest buffer");
+  }
+
   return FALSE;
 }
 

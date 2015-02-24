@@ -3,11 +3,13 @@ plugin_LTLIBRARIES = libgsthdsdemux.la
 
 libgsthdsdemux_la_SOURCES =			\
 	gsthdsdemux.c				\
+        gsthdsclient.c				\
 	gstplugin.c
 
 # headers we need but don't want installed
 noinst_HEADERS =        \
 	gsthdsdemux.h	\
+        gsthdsclient.h	\
 	gsthds_debug.h
 
 # compiler and linker flags used to compile this plugin, set in configure.ac
