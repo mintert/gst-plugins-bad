@@ -266,6 +266,7 @@ check_PROGRAMS = \
 	libs/h264parser \
 	libs/vp8parser \
 	libs/aggregator \
+	libs/basemixer \
 	$(check_uvch264) \
 	libs/vc1parser \
 	$(check_schro) \
@@ -513,6 +514,15 @@ libs_aggregator_LDADD = \
 	$(GST_BASE_LIBS) $(GST_LIBS) $(LDADD)
 
 libs_aggregator_CFLAGS = \
+	$(GST_PLUGINS_BAD_CFLAGS) $(GST_PLUGINS_BASE_CFLAGS) \
+	-DGST_USE_UNSTABLE_API \
+	$(GST_BASE_CFLAGS) $(GST_CFLAGS) $(AM_CFLAGS)
+
+libs_basemixer_LDADD = \
+	$(top_builddir)/gst-libs/gst/base/libgstbadbase-@GST_API_VERSION@.la \
+	$(GST_PLUGINS_BASE_LIBS) \
+	$(GST_BASE_LIBS) $(GST_LIBS) $(LDADD)
+libs_basemixer_CFLAGS = \
 	$(GST_PLUGINS_BAD_CFLAGS) $(GST_PLUGINS_BASE_CFLAGS) \
 	-DGST_USE_UNSTABLE_API \
 	$(GST_BASE_CFLAGS) $(GST_CFLAGS) $(AM_CFLAGS)
