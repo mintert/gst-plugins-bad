@@ -26,6 +26,7 @@
 #include "gstviewfinderbin.h"
 #include "gstwrappercamerabinsrc.h"
 #include "gstcamerabin2.h"
+#include "gstdigitalzoom.h"
 
 static gboolean
 plugin_init (GstPlugin * plugin)
@@ -36,6 +37,8 @@ plugin_init (GstPlugin * plugin)
     return FALSE;
   if (!gst_camera_bin2_plugin_init (plugin))
     return FALSE;
+  return gst_element_register (plugin, "digitalzoom", GST_RANK_NONE,
+      gst_digital_zoom_get_type ());
 
   return TRUE;
 }
