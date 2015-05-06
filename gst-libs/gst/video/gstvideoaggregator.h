@@ -29,6 +29,7 @@
 #include <gst/gst.h>
 #include <gst/video/video.h>
 #include <gst/base/gstaggregator.h>
+#include <gst/base/gstbasemixer.h>
 
 G_BEGIN_DECLS
 
@@ -57,7 +58,7 @@ typedef struct _GstVideoAggregatorPrivate GstVideoAggregatorPrivate;
  */
 struct _GstVideoAggregator
 {
-  GstAggregator aggregator;
+  GstBaseMixer bmixer;
 
   /*< public >*/
   /* Output caps */
@@ -93,7 +94,7 @@ struct _GstVideoAggregator
 struct _GstVideoAggregatorClass
 {
   /*< private >*/
-  GstAggregatorClass parent_class;
+  GstBaseMixerClass parent_class;
 
   /*< public >*/
   GstCaps *          (*update_caps)               (GstVideoAggregator *  videoaggregator,

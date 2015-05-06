@@ -25,6 +25,7 @@
 #include <gst/video/video.h>
 
 #include <gst/base/gstaggregator.h>
+#include <gst/base/gstbasemixer.h>
 #include "gstvideoaggregator.h"
 
 G_BEGIN_DECLS
@@ -56,7 +57,7 @@ typedef struct _GstVideoAggregatorPadPrivate GstVideoAggregatorPadPrivate;
  */
 struct _GstVideoAggregatorPad
 {
-  GstAggregatorPad parent;
+  GstBaseMixerPad parent;
 
   GstVideoInfo info;
 
@@ -90,7 +91,7 @@ struct _GstVideoAggregatorPad
  */
 struct _GstVideoAggregatorPadClass
 {
-  GstAggregatorPadClass parent_class;
+  GstBaseMixerPadClass parent_class;
   gboolean           (*set_info)              (GstVideoAggregatorPad * pad,
                                                GstVideoAggregator    * videoaggregator,
                                                GstVideoInfo          * current_info,

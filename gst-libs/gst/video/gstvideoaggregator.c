@@ -75,7 +75,7 @@ struct _GstVideoAggregatorPadPrivate
 };
 
 G_DEFINE_TYPE (GstVideoAggregatorPad, gst_videoaggregator_pad,
-    GST_TYPE_AGGREGATOR_PAD);
+    GST_TYPE_BASE_MIXER_PAD);
 
 static void
 gst_videoaggregator_pad_get_property (GObject * object, guint prop_id,
@@ -414,7 +414,7 @@ struct _GstVideoAggregatorPrivate
 };
 
 G_DEFINE_ABSTRACT_TYPE_WITH_CODE (GstVideoAggregator, gst_videoaggregator,
-    GST_TYPE_AGGREGATOR, G_IMPLEMENT_INTERFACE (GST_TYPE_CHILD_PROXY,
+    GST_TYPE_BASE_MIXER, G_IMPLEMENT_INTERFACE (GST_TYPE_CHILD_PROXY,
         gst_videoaggregator_child_proxy_init));
 
 static void
@@ -950,6 +950,7 @@ gst_videoaggregator_reset (GstVideoAggregator * vagg)
 }
 
 #define GST_FLOW_NEEDS_DATA GST_FLOW_CUSTOM_ERROR
+#if 0
 static gint
 gst_videoaggregator_fill_queues (GstVideoAggregator * vagg,
     GstClockTime output_start_time, GstClockTime output_end_time)
@@ -1136,6 +1137,7 @@ gst_videoaggregator_fill_queues (GstVideoAggregator * vagg,
 
   return GST_FLOW_OK;
 }
+#endif
 
 static gboolean
 sync_pad_values (GstVideoAggregator * vagg, GstVideoAggregatorPad * pad)
@@ -1184,10 +1186,11 @@ clean_pad (GstVideoAggregator * vagg, GstVideoAggregatorPad * pad)
 }
 
 static GstFlowReturn
-gst_videoaggregator_do_aggregate (GstVideoAggregator * vagg,
+gst_videoaggregator_do_mix (GstBaseMixer * bmixer,
     GstClockTime output_start_time, GstClockTime output_end_time,
     GstBuffer ** outbuf)
 {
+  GstVideoAggregator *vagg = GST_VIDEO_AGGREGATOR (bmixer);
   GstFlowReturn ret = GST_FLOW_OK;
   GstElementClass *klass = GST_ELEMENT_GET_CLASS (vagg);
   GstVideoAggregatorClass *vagg_klass = (GstVideoAggregatorClass *) klass;
@@ -1334,22 +1337,36 @@ gst_videoaggregator_check_reconfigure (GstVideoAggregator * vagg,
 }
 
 static GstFlowReturn
-gst_videoaggregator_aggregate (GstAggregator * agg, gboolean timeout)
+gst_videoaggregator_prepare (GstBaseMixer * bmixer, gboolean timeout)
 {
-  GstVideoAggregator *vagg = GST_VIDEO_AGGREGATOR (agg);
-  GstClockTime output_start_time, output_end_time;
-  GstBuffer *outbuf = NULL;
+  GstVideoAggregator *vagg = GST_VIDEO_AGGREGATOR (bmixer);
   GstFlowReturn res;
-  gint64 jitter;
 
   GST_VIDEO_AGGREGATOR_LOCK (vagg);
-
   res = gst_videoaggregator_check_reconfigure (vagg, timeout);
   if (res != GST_FLOW_OK) {
     if (res == GST_FLOW_NEEDS_DATA)
       res = GST_FLOW_OK;
-    goto unlock_and_return;
   }
+  GST_VIDEO_AGGREGATOR_UNLOCK (vagg);
+
+  /* FIXME - this and the _aggregate functions were protected without any
+   * unlock in the middle. Double-check that unlocking here won't have
+   * any side effects */
+
+  return res;
+}
+
+static void
+gst_videoaggregator_adjust_times (GstBaseMixer * bmixer, GstClockTime * start,
+    GstClockTime * end)
+{
+#if 0
+  GstAggregator *agg = GST_AGGREGATOR (bmixer);
+  GstVideoAggregator *vagg = GST_VIDEO_AGGREGATOR (bmixer);
+  GstClockTime output_end_time;
+
+  GST_VIDEO_AGGREGATOR_LOCK (vagg);
 
   output_start_time = gst_videoaggregator_get_next_time (agg);
 
@@ -1364,6 +1381,7 @@ gst_videoaggregator_aggregate (GstAggregator * agg, gboolean timeout)
 
   if (agg->segment.stop != -1)
     output_end_time = MIN (output_end_time, agg->segment.stop);
+  *end = output_end_time;
 
   if (output_end_time == output_start_time) {
     res = GST_FLOW_EOS;
@@ -1372,7 +1390,23 @@ gst_videoaggregator_aggregate (GstAggregator * agg, gboolean timeout)
         gst_videoaggregator_fill_queues (vagg, output_start_time,
         output_end_time);
   }
+  GST_VIDEO_AGGREGATOR_UNLOCK (vagg);
+#endif
+}
 
+static GstFlowReturn
+gst_videoaggregator_mix (GstBaseMixer * bmixer, GstClockTime output_start_time,
+    GstClockTime output_end_time)
+{
+  GstVideoAggregator *vagg = GST_VIDEO_AGGREGATOR (bmixer);
+  GstAggregator *agg = GST_AGGREGATOR (bmixer);
+  GstBuffer *outbuf = NULL;
+  GstFlowReturn res;
+  gint64 jitter;
+
+  GST_VIDEO_AGGREGATOR_LOCK (vagg);
+
+#if 0
   if (res == GST_FLOW_NEEDS_DATA && !timeout) {
     GST_DEBUG_OBJECT (vagg, "Need more data for decisions");
     res = GST_FLOW_OK;
@@ -1384,10 +1418,11 @@ gst_videoaggregator_aggregate (GstAggregator * agg, gboolean timeout)
     GST_WARNING_OBJECT (vagg, "Error collecting buffers");
     goto unlock_and_return;
   }
+#endif
 
   jitter = gst_videoaggregator_do_qos (vagg, output_start_time);
   if (jitter <= 0) {
-    res = gst_videoaggregator_do_aggregate (vagg, output_start_time,
+    res = gst_videoaggregator_do_mix (bmixer, output_start_time,
         output_end_time, &outbuf);
     if (ret != GST_FLOW_OK)
       goto done;
@@ -1422,16 +1457,18 @@ gst_videoaggregator_aggregate (GstAggregator * agg, gboolean timeout)
         GST_TIME_FORMAT, GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (outbuf)),
         GST_TIME_ARGS (GST_BUFFER_DURATION (outbuf)));
 
-    res = gst_aggregator_finish_buffer (agg, outbuf);
+    res = gst_base_mixer_finish_buffer (bmixer, outbuf);
   }
   return res;
 
 done:
   if (outbuf)
     gst_buffer_unref (outbuf);
+#if 0
 unlock_and_return:
   GST_VIDEO_AGGREGATOR_UNLOCK (vagg);
   return res;
+#endif
 }
 
 /* FIXME, the duration query should reflect how long you will produce
@@ -1970,6 +2007,7 @@ gst_videoaggregator_class_init (GstVideoAggregatorClass * klass)
   GObjectClass *gobject_class = (GObjectClass *) klass;
   GstElementClass *gstelement_class = (GstElementClass *) klass;
   GstAggregatorClass *agg_class = (GstAggregatorClass *) klass;
+  GstBaseMixerClass *bmixer_class = (GstBaseMixerClass *) klass;
 
   GST_DEBUG_CATEGORY_INIT (gst_videoaggregator_debug, "videoaggregator", 0,
       "base video aggregator");
@@ -1994,10 +2032,13 @@ gst_videoaggregator_class_init (GstVideoAggregatorClass * klass)
   agg_class->sink_event = gst_videoaggregator_sink_event;
   agg_class->flush = gst_videoaggregator_flush;
   agg_class->clip = gst_videoaggregator_sink_clip;
-  agg_class->aggregate = gst_videoaggregator_aggregate;
   agg_class->src_event = gst_videoaggregator_src_event;
   agg_class->src_query = gst_videoaggregator_src_query;
   agg_class->get_next_time = gst_videoaggregator_get_next_time;
+
+  bmixer_class->prepare = gst_videoaggregator_prepare;
+  bmixer_class->adjust_times = gst_videoaggregator_adjust_times;
+  bmixer_class->mix = gst_videoaggregator_mix;
 
   klass->find_best_format = gst_videoaggreagator_find_best_format;
   klass->get_output_buffer = gst_videoaggregator_get_output_buffer;
