@@ -247,6 +247,11 @@ struct _GstAggregatorClass {
   gpointer          _gst_reserved[GST_PADDING_LARGE];
 };
 
+/************************************
+ * GstAggregator convenience macros *
+ ***********************************/
+#define GST_AGGREGATOR_SRC_PAD(agg) (((GstAggregator *)(agg))->srcpad)
+
 /*************************
  * GstAggregator methods *
  ************************/
