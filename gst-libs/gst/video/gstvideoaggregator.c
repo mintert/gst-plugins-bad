@@ -1345,12 +1345,10 @@ gst_videoaggregator_aggregate (GstAggregator * agg, gboolean timeout)
   GST_VIDEO_AGGREGATOR_LOCK (vagg);
 
   res = gst_videoaggregator_check_reconfigure (vagg, timeout);
-  if (res == GST_FLOW_NEEDS_DATA) {
-    GST_VIDEO_AGGREGATOR_UNLOCK (vagg);
-    return GST_FLOW_OK;
-  } else if (res != GST_FLOW_OK) {
-    GST_VIDEO_AGGREGATOR_UNLOCK (vagg);
-    return res;
+  if (res != GST_FLOW_OK) {
+    if (res == GST_FLOW_NEEDS_DATA)
+      res = GST_FLOW_OK;
+    goto unlock_and_return;
   }
 
   output_start_time = gst_videoaggregator_get_next_time (agg);
@@ -1378,14 +1376,13 @@ gst_videoaggregator_aggregate (GstAggregator * agg, gboolean timeout)
   if (res == GST_FLOW_NEEDS_DATA && !timeout) {
     GST_DEBUG_OBJECT (vagg, "Need more data for decisions");
     res = GST_FLOW_OK;
-    goto done;
+    goto unlock_and_return;
   } else if (res == GST_FLOW_EOS) {
-    GST_VIDEO_AGGREGATOR_UNLOCK (vagg);
     GST_DEBUG_OBJECT (vagg, "All sinkpads are EOS -- forwarding");
-    goto done_unlocked;
+    goto unlock_and_return;
   } else if (res == GST_FLOW_ERROR) {
     GST_WARNING_OBJECT (vagg, "Error collecting buffers");
-    goto done;
+    goto unlock_and_return;
   }
 
   jitter = gst_videoaggregator_do_qos (vagg, output_start_time);
@@ -1427,14 +1424,13 @@ gst_videoaggregator_aggregate (GstAggregator * agg, gboolean timeout)
 
     res = gst_aggregator_finish_buffer (agg, outbuf);
   }
-  goto done_unlocked;
+  return res;
 
 done:
   if (outbuf)
     gst_buffer_unref (outbuf);
+unlock_and_return:
   GST_VIDEO_AGGREGATOR_UNLOCK (vagg);
-
-done_unlocked:
   return res;
 }
 
