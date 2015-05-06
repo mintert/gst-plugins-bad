@@ -205,13 +205,62 @@ gst_base_mixer_mix (GstBaseMixer * bmixer, GstClockTime start, GstClockTime end)
 }
 
 static GstFlowReturn
+gst_base_mixer_prepare (GstBaseMixer * bmixer, gboolean timeout)
+{
+  GstBaseMixerClass *bmixer_class = GST_BASE_MIXER_GET_CLASS (bmixer);
+
+  if (bmixer_class->prepare)
+    return bmixer_class->prepare (bmixer, timeout);
+  return GST_FLOW_OK;
+}
+
+/* TODO write unit tests for this feature */
+/* FIXME - design: by reducing the 'end' time the class will be
+ * forced to mix again the same data, which will likely waste CPU.
+ * It might make more sense to make subclasses push multiple buffers
+ * from the same mix() call as it would be possible to push the same
+ * buffer reference over again */
+static void
+gst_base_mixer_adjust_times (GstBaseMixer * bmixer, GstClockTime * start,
+    GstClockTime * end)
+{
+  GstBaseMixerClass *bmixer_class = GST_BASE_MIXER_GET_CLASS (bmixer);
+
+  if (bmixer_class->adjust_times)
+    bmixer_class->adjust_times (bmixer, start, end);
+}
+
+static GstFlowReturn
 gst_base_mixer_aggregate (GstAggregator * agg, gboolean timeout)
 {
   GstBaseMixer *bmixer = GST_BASE_MIXER_CAST (agg);
   GstClockTime start, end;
+  GstClockTime suggested_start, suggested_end;
   GstFlowReturn ret;
 
+  ret = gst_base_mixer_prepare (bmixer, timeout);
+  if (ret != GST_FLOW_OK)
+    return ret;
+
   gst_base_mixer_find_time_alignment (bmixer, &start, &end);
+  suggested_start = start;
+  suggested_end = end;
+
+  /* check if subclass wants a different mixing time */
+  gst_base_mixer_adjust_times (bmixer, &start, &end);
+
+  /* Subclass should only increase start and/or decrease end,
+   * Decreasing start means returning in time and we might not
+   * have that data anymore.
+   * Increasing end will go beyond the mixing limit of the current
+   * data and will lead to incorrect results */
+  g_assert (start >= suggested_start);
+  g_assert (end <= suggested_end);
+
+  if (start > suggested_start) {
+    /* TODO implement this -
+     * subclass wants to skip some data */
+  }
 
   ret = gst_base_mixer_mix (bmixer, start, end);
 

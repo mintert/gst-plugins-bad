@@ -140,6 +140,14 @@ struct _GstBaseMixerClass {
 
   GstFlowReturn (*mix) (GstBaseMixer * bmixer, GstClockTime start, GstClockTime end);
 
+  /* Subclass can do extra work before mix is called */
+  GstFlowReturn (*prepare) (GstBaseMixer * bmixer, gboolean timeout);
+
+  /* Subclass can adjust the start and end times of the next mix call to their liking.
+   * It is only allowed to increase @start if it wants to skip some data and to reduce
+   * @end if it wants to mix less data in this turn */
+  void (*adjust_times) (GstBaseMixer * bmixer, GstClockTime * start, GstClockTime * end);
+
   /*< private >*/
   gpointer          _gst_reserved[GST_PADDING_LARGE];
 };
