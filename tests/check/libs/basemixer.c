@@ -442,6 +442,12 @@ run_test (GList ** inputs, gint n_inputs, GList * expected_output)
   g_free (threads);
 }
 
+typedef struct
+{
+  guint8 value;
+  GstClockTime duration;
+} SumMixerBufferData;
+
 static GList *
 input_list_from_string (const gchar * str)
 {
@@ -468,6 +474,53 @@ input_list_from_string (const gchar * str)
   }
 
   return g_list_append (list, gst_event_new_eos ());
+}
+
+static GList *
+input_list_from_buffer_data (const SumMixerBufferData * buffer_data)
+{
+  GList *list = NULL;
+  GstClockTime ts = 0;
+  gint i = 0;
+
+  while (buffer_data[i].duration != 0) {
+    if (buffer_data[i].value == 0) {
+      GstEvent *gap;
+
+      gap = gst_event_new_gap (ts, buffer_data[i].duration);
+      list = g_list_append (list, gap);
+    } else {
+
+      GstBuffer *buf;
+      guint8 *data = g_malloc (sizeof (guint8));
+      data[0] = buffer_data[i].value;
+
+      buf = gst_buffer_new_wrapped (data, 1);
+      GST_BUFFER_PTS (buf) = ts;
+      GST_BUFFER_DURATION (buf) = buffer_data[i].duration;
+      list = g_list_append (list, buf);
+    }
+
+    ts += buffer_data[i].duration;
+    i++;
+  }
+
+  return g_list_append (list, gst_event_new_eos ());
+}
+
+static void
+run_test_from_buffer_data (const SumMixerBufferData ** input_data,
+    gint n_inputs, const SumMixerBufferData * expected_output_data)
+{
+  GList **inputs = g_malloc0 (sizeof (GList *) * n_inputs);
+  GList *expected_output = NULL;
+  gint i;
+
+  for (i = 0; i < n_inputs; i++) {
+    inputs[i] = input_list_from_buffer_data (input_data[i]);
+  }
+  expected_output = input_list_from_buffer_data (expected_output_data);
+  run_test (inputs, n_inputs, expected_output);
 }
 
 /* Generates test cases from strings of numbers. All buffers
@@ -541,6 +594,61 @@ GST_START_TEST (test_mix_streams_aligned_input_finishing_early)
 
 GST_END_TEST;
 
+GST_START_TEST (test_mix_2_streams)
+{
+  const SumMixerBufferData input_1[] = {
+    {1, GST_SECOND}, {1, 0},    /* 1s */
+  };
+  const SumMixerBufferData input_2[] = {
+    {2, GST_SECOND / 2}, {2, GST_SECOND / 4}, {2, 0}    /* 0.5s, 0.25s */
+  };
+  const SumMixerBufferData *inputs[] = {
+    input_1, input_2
+  };
+
+  const SumMixerBufferData output[] = {
+    {3, GST_SECOND / 2}, {3, GST_SECOND / 4}, {1, GST_SECOND / 4}, {0, 0}
+  };
+
+  run_test_from_buffer_data (inputs, 2, output);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_mix_3_streams)
+{
+  const SumMixerBufferData input_1[] = {
+    {1, 3 * GST_SECOND}, {1, 3 * GST_SECOND},   /* 3s, 3s, 3s, 3s */
+    {1, 3 * GST_SECOND}, {1, 3 * GST_SECOND}, {1, 0}
+  };
+  const SumMixerBufferData input_2[] = {
+    {2, 4 * GST_SECOND}, {2, 4 * GST_SECOND},   /* 4s, 4s, 4s */
+    {2, 4 * GST_SECOND}, {2, 0}
+  };
+  const SumMixerBufferData input_3[] = {
+    {4, 5 * GST_SECOND}, {4, 5 * GST_SECOND}, {4, 0}    /* 5s, 5s */
+  };
+  const SumMixerBufferData *inputs[] = {
+    input_1, input_2, input_3
+  };
+
+  const SumMixerBufferData output[] = {
+    {7, 3 * GST_SECOND},        /* 0-3 */
+    {7, 1 * GST_SECOND},        /* 3-4 */
+    {7, 1 * GST_SECOND},        /* 4-5 */
+    {7, 1 * GST_SECOND},        /* 5-6 */
+    {7, 2 * GST_SECOND},        /* 6-8 */
+    {7, 1 * GST_SECOND},        /* 8-9 */
+    {7, 1 * GST_SECOND},        /* 9-10 */
+    {3, 2 * GST_SECOND},        /* 10-12 */
+    {0, 0}
+  };
+
+  run_test_from_buffer_data (inputs, 3, output);
+}
+
+GST_END_TEST;
+
 
 static Suite *
 gst_base_mixer_suite (void)
@@ -554,10 +662,16 @@ gst_base_mixer_suite (void)
 
   general = tcase_create ("general");
   suite_add_tcase (suite, general);
+
+  /* Tests where buffers are always 1s long so alignment is easier */
   tcase_add_test (general, test_mix_1_stream);
   tcase_add_test (general, test_mix_2_streams_aligned_input);
   tcase_add_test (general, test_mix_3_streams_aligned_input);
   tcase_add_test (general, test_mix_streams_aligned_input_finishing_early);
+
+  /* Tests where buffer durations are flexible */
+  tcase_add_test (general, test_mix_2_streams);
+  tcase_add_test (general, test_mix_3_streams);
 
   return suite;
 }
