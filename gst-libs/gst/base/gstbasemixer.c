@@ -33,6 +33,13 @@
 GST_DEBUG_CATEGORY_STATIC (base_mixer_debug);
 #define GST_CAT_DEFAULT base_mixer_debug
 
+typedef struct _GstBaseMixerTimeAlignment
+{
+  GstClockTime start;
+  GstClockTime end;
+} GstBaseMixerTimeAlignment;
+
+
 struct _GstBaseMixerPadPrivate
 {
   GstClockTime offset;
@@ -57,15 +64,91 @@ gst_base_mixer_pad_init (GstBaseMixerPad * pad)
       GstBaseMixerPadPrivate);
 }
 
+static gboolean
+gst_base_mixer_pad_get_times_for_buffer (GstBaseMixerPad * mixerpad,
+    GstBuffer * buf, GstClockTime * start, GstClockTime * end)
+{
+  *start = GST_CLOCK_TIME_NONE;
+  *end = GST_CLOCK_TIME_NONE;
+
+  if (GST_BUFFER_PTS_IS_VALID (buf)) {
+    *start =
+        gst_segment_to_running_time (&(GST_AGGREGATOR_PAD_CAST
+            (mixerpad)->segment), GST_FORMAT_TIME,
+        GST_BUFFER_PTS (buf) + mixerpad->priv->offset);
+    if (GST_BUFFER_DURATION_IS_VALID (buf)) {
+      *end = *start + GST_BUFFER_DURATION (buf) - mixerpad->priv->offset;       /* TODO clip on segment */
+    }
+  }
+  GST_DEBUG_OBJECT (mixerpad,
+      "Pad has times: %" GST_TIME_FORMAT " - %" GST_TIME_FORMAT,
+      GST_TIME_ARGS (*start), GST_TIME_ARGS (*end));
+  return TRUE;
+}
+
+static gboolean
+gst_base_mixer_pad_get_times (GstBaseMixerPad * mixerpad, GstClockTime * start,
+    GstClockTime * end)
+{
+  GstBuffer *buf;
+
+  buf = gst_aggregator_pad_get_buffer (GST_AGGREGATOR_PAD_CAST (mixerpad));
+  if (buf) {
+    gst_base_mixer_pad_get_times_for_buffer (mixerpad, buf, start, end);
+    gst_buffer_unref (buf);
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+static GstClockTime
+gst_base_mixer_pad_get_duration_within_times (GstBaseMixerPad * mixerpad,
+    GstBuffer * buffer, GstClockTime start, GstClockTime end)
+{
+  GstClockTime buf_start = GST_CLOCK_TIME_NONE, buf_end = GST_CLOCK_TIME_NONE;
+
+  if (buffer) {
+    gst_base_mixer_pad_get_times_for_buffer (mixerpad, buffer, &buf_start,
+        &buf_end);
+
+    /* we are advancing a time before our own buffer. Nothing to advance for us */
+    if (end <= buf_start) {
+      GST_LOG_OBJECT (mixerpad, "Our buffer is ahead of the current mix time."
+          " No advancing needed");
+      return 0;
+    }
+
+    /* TODO verify if this is possible, and likely add unit tests for it */
+    if (buf_end <= start) {
+      GST_LOG_OBJECT (mixerpad, "Our buffer is behind the mixing time, "
+          "advance it all");
+      return buf_end - buf_start;
+    }
+
+    return MIN (end, buf_end) - buf_start;
+  }
+
+  return 0;
+}
+
 static void
-gst_base_mixer_pad_advance (GstBaseMixerPad * mixerpad, GstClockTime duration)
+gst_base_mixer_pad_advance (GstBaseMixerPad * mixerpad, GstClockTime start,
+    GstClockTime end)
 {
   GstBuffer *buffer;
+  GstClockTime duration = 0;
 
-  GST_LOG_OBJECT (mixerpad, "Advancing: %" GST_TIME_FORMAT,
-      GST_TIME_ARGS (duration));
+  GST_LOG_OBJECT (mixerpad,
+      "Advancing: %" GST_TIME_FORMAT "- %" GST_TIME_FORMAT,
+      GST_TIME_ARGS (start), GST_TIME_ARGS (end));
 
   buffer = gst_aggregator_pad_get_buffer (GST_AGGREGATOR_PAD_CAST (mixerpad));
+  duration =
+      gst_base_mixer_pad_get_duration_within_times (mixerpad, buffer, start,
+      end);
+  GST_DEBUG_OBJECT (mixerpad, "Advancing duration: %" GST_TIME_FORMAT,
+      GST_TIME_ARGS (duration));
   if (buffer) {
     mixerpad->priv->offset += duration;
     if (GST_BUFFER_DURATION_IS_VALID (buffer)) {
@@ -82,6 +165,7 @@ gst_base_mixer_pad_advance (GstBaseMixerPad * mixerpad, GstClockTime duration)
   }
 }
 
+
 /*************************************
  * GstBaseMixer implementation  *
  *************************************/
@@ -94,51 +178,35 @@ struct _GstBaseMixerPrivate
   gint non_empty;
 };
 
-typedef struct _GstBaseMixerTimeAlignment
-{
-  GstClockTime start;
-  GstClockTime end;
-} GstBaseMixerTimeAlignment;
-
 static gboolean
 gst_base_mixer_find_time_alignment_foreach (GstAggregator * agg,
     GstAggregatorPad * aggpad, gpointer udata)
 {
   GstBaseMixerPad *mixerpad = GST_BASE_MIXER_PAD_CAST (aggpad);
   GstBaseMixerTimeAlignment *talign = udata;
-  GstBuffer *buf;
+  GstClockTime start, end;
 
   /* TODO handle GST_CLOCK_TIME_NONE */
   /* TODO check if segment/buffer in aggregator is racy */
   /* TODO do we need to lock the pad here? */
   /* TODO do we need to translate the timestamps here to the output segment?
    *      or is it always good as it is based on running time? */
+  /* TODO skip data that is late (pads that joined after stream has started */
 
   GST_LOG_OBJECT (aggpad,
       "Checking pad data. Current offset: %" GST_TIME_FORMAT,
       GST_TIME_ARGS (mixerpad->priv->offset));
 
-  buf = gst_aggregator_pad_get_buffer (aggpad);
-  if (buf) {
-    GstClockTime start = GST_CLOCK_TIME_NONE, end = GST_CLOCK_TIME_NONE;
-    if (GST_BUFFER_PTS_IS_VALID (buf)) {
-      start =
-          gst_segment_to_running_time (&aggpad->segment, GST_FORMAT_TIME,
-          GST_BUFFER_PTS (buf) + mixerpad->priv->offset);
-      if (GST_BUFFER_DURATION_IS_VALID (buf)) {
-        end = start + GST_BUFFER_DURATION (buf) - mixerpad->priv->offset;       /* TODO clip on segment */
+  if (gst_base_mixer_pad_get_times (mixerpad, &start, &end)) {
+    if (GST_CLOCK_TIME_IS_VALID (start)) {
+      if (start < talign->start)
+        talign->start = start;
 
+      if (GST_CLOCK_TIME_IS_VALID (end)) {
         if (end < talign->end)
           talign->end = end;
       }
-
-      if (start < talign->start)
-        talign->start = start;
     }
-    GST_DEBUG_OBJECT (aggpad,
-        "Pad has times: %" GST_TIME_FORMAT " - %" GST_TIME_FORMAT,
-        GST_TIME_ARGS (start), GST_TIME_ARGS (end));
-    gst_buffer_unref (buf);
   }
 
   return TRUE;
@@ -170,29 +238,39 @@ gst_base_mixer_advance_foreach (GstAggregator * agg, GstAggregatorPad * aggpad,
     gpointer udata)
 {
   GstBaseMixerPad *mixerpad = GST_BASE_MIXER_PAD_CAST (aggpad);
-  GstClockTime *duration = udata;
+  GstBaseMixerTimeAlignment *t = udata;
 
-  gst_base_mixer_pad_advance (mixerpad, *duration);
+  gst_base_mixer_pad_advance (mixerpad, t->start, t->end);
   return TRUE;
 }
 
 static void
-gst_base_mixer_advance (GstBaseMixer * bmixer, GstClockTime duration)
+gst_base_mixer_advance (GstBaseMixer * bmixer, GstClockTime ts,
+    GstClockTime duration)
 {
+  GstBaseMixerTimeAlignment t;
+
+  t.start = ts;
+  if (GST_CLOCK_TIME_IS_VALID (duration)) {
+    t.end = ts + duration;
+  } else {
+    t.end = GST_CLOCK_TIME_NONE;
+  }
   gst_aggregator_iterate_sinkpads (GST_AGGREGATOR_CAST (bmixer),
-      gst_base_mixer_advance_foreach, &duration);
+      gst_base_mixer_advance_foreach, &t);
 }
 
 GstFlowReturn
 gst_base_mixer_finish_buffer (GstBaseMixer * bmixer, GstBuffer * buffer)
 {
   GstFlowReturn ret;
-  GstClockTime dur;
+  GstClockTime ts, dur;
 
+  ts = GST_BUFFER_PTS (buffer);
   dur = GST_BUFFER_DURATION (buffer);
 
   ret = gst_aggregator_finish_buffer (GST_AGGREGATOR_CAST (bmixer), buffer);
-  gst_base_mixer_advance (bmixer, dur);
+  gst_base_mixer_advance (bmixer, ts, dur);
 
   return ret;
 }
@@ -203,6 +281,8 @@ gst_base_mixer_mix (GstBaseMixer * bmixer, GstClockTime start, GstClockTime end)
   GstBaseMixerClass *bmixer_class = GST_BASE_MIXER_GET_CLASS (bmixer);
 
   g_return_val_if_fail (bmixer_class->mix != NULL, GST_FLOW_ERROR);
+
+  GST_DEBUG_OBJECT (bmixer, "Starting mix");
 
   return bmixer_class->mix (bmixer, start, end);
 }
