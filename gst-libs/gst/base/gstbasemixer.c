@@ -187,9 +187,12 @@ GstFlowReturn
 gst_base_mixer_finish_buffer (GstBaseMixer * bmixer, GstBuffer * buffer)
 {
   GstFlowReturn ret;
+  GstClockTime dur;
+
+  dur = GST_BUFFER_DURATION (buffer);
 
   ret = gst_aggregator_finish_buffer (GST_AGGREGATOR_CAST (bmixer), buffer);
-  gst_base_mixer_advance (bmixer, GST_BUFFER_DURATION (buffer));
+  gst_base_mixer_advance (bmixer, dur);
 
   return ret;
 }
