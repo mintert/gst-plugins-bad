@@ -622,6 +622,7 @@ gst_gl_mixer_process_textures (GstGLMixer * mix, GstBuffer * outbuf)
     mix->frames->pdata[i] = g_slice_new0 (GstGLMixerFrameData);
   while (walk) {
     GstGLMixerPad *pad = GST_GL_MIXER_PAD (walk->data);
+    GstBaseMixerPad *mixerpad = GST_BASE_MIXER_PAD (pad);
     GstVideoAggregatorPad *vaggpad = walk->data;
     GstGLMixerFrameData *frame;
 
@@ -631,7 +632,7 @@ gst_gl_mixer_process_textures (GstGLMixer * mix, GstBuffer * outbuf)
 
     walk = g_list_next (walk);
 
-    if (vaggpad->buffer != NULL) {
+    if (mixerpad->buffer != NULL) {
       GstVideoInfo gl_info;
       GstVideoFrame gl_frame;
       GstGLSyncMeta *sync_meta;
@@ -641,11 +642,11 @@ gst_gl_mixer_process_textures (GstGLMixer * mix, GstBuffer * outbuf)
           GST_VIDEO_INFO_WIDTH (&vaggpad->info),
           GST_VIDEO_INFO_HEIGHT (&vaggpad->info));
 
-      sync_meta = gst_buffer_get_gl_sync_meta (vaggpad->buffer);
+      sync_meta = gst_buffer_get_gl_sync_meta (mixerpad->buffer);
       if (sync_meta)
         gst_gl_sync_meta_wait (sync_meta, GST_GL_BASE_MIXER (mix)->context);
 
-      if (gst_video_frame_map (&gl_frame, &gl_info, vaggpad->buffer,
+      if (gst_video_frame_map (&gl_frame, &gl_info, mixerpad->buffer,
               GST_MAP_READ | GST_MAP_GL)) {
         frame->texture = *(guint *) gl_frame.data[0];
         gst_video_frame_unmap (&gl_frame);
@@ -694,13 +695,13 @@ gst_gl_mixer_process_buffers (GstGLMixer * mix, GstBuffer * outbuf)
   for (; i < element->numsinkpads; i++)
     mix->frames->pdata[i] = g_slice_new0 (GstGLMixerFrameData);
   while (walk) {                /* We walk with this list because it's ordered */
-    GstVideoAggregatorPad *vaggpad = walk->data;
+    GstBaseMixerPad *mixerpad = walk->data;
 
     walk = g_list_next (walk);
 
-    if (vaggpad->buffer != NULL) {
+    if (mixerpad->buffer != NULL) {
       /* put buffer into array */
-      mix->array_buffers->pdata[array_index] = vaggpad->buffer;
+      mix->array_buffers->pdata[array_index] = mixerpad->buffer;
     }
     ++array_index;
   }

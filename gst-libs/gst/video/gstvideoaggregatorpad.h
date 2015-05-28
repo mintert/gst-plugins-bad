@@ -61,7 +61,6 @@ struct _GstVideoAggregatorPad
 
   GstVideoInfo info;
 
-  GstBuffer *buffer;
   /* The caps on the pad may not match the buffer above because of two reasons:
    * 1) When caps change, the info above will get updated, but the buffer might
    *    not since it might be pending on the GstAggregatorPad

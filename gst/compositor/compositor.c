@@ -356,6 +356,7 @@ gst_compositor_pad_prepare_frame (GstVideoAggregatorPad * pad,
 {
   GstCompositor *comp = GST_COMPOSITOR (vagg);
   GstCompositorPad *cpad = GST_COMPOSITOR_PAD (pad);
+  GstBaseMixerPad *mixerpad = GST_BASE_MIXER_PAD_CAST (pad);
   guint outsize;
   GstVideoFrame *converted_frame;
   GstBuffer *converted_buf = NULL;
@@ -368,7 +369,7 @@ gst_compositor_pad_prepare_frame (GstVideoAggregatorPad * pad,
    * Due to the clamping, this is different from the frame width/height above. */
   GstVideoRectangle frame_rect;
 
-  if (!pad->buffer)
+  if (!mixerpad->buffer)
     return TRUE;
 
   /* There's three types of width/height here:
@@ -471,6 +472,7 @@ gst_compositor_pad_prepare_frame (GstVideoAggregatorPad * pad,
     GstVideoAggregatorPad *pad2 = l->data;
     GstCompositorPad *cpad2 = GST_COMPOSITOR_PAD (pad2);
     gint pad2_width, pad2_height;
+    GstBaseMixerPad *mixerpad2 = GST_BASE_MIXER_PAD_CAST (cpad2);
 
     _mixer_pad_get_output_size (comp, cpad2, &pad2_width, &pad2_height);
 
@@ -484,7 +486,7 @@ gst_compositor_pad_prepare_frame (GstVideoAggregatorPad * pad,
 
     /* Check if there's a buffer to be aggregated, ensure it can't have an alpha
      * channel, then check opacity and frame boundaries */
-    if (pad2->buffer && cpad2->alpha == 1.0 &&
+    if (mixerpad2->buffer && cpad2->alpha == 1.0 &&
         !GST_VIDEO_INFO_HAS_ALPHA (&pad2->info) &&
         is_rectangle_contained (frame_rect, frame2_rect)) {
       frame_obscured = TRUE;
@@ -508,7 +510,7 @@ gst_compositor_pad_prepare_frame (GstVideoAggregatorPad * pad,
 
   frame = g_slice_new0 (GstVideoFrame);
 
-  if (!gst_video_frame_map (frame, &pad->buffer_vinfo, pad->buffer,
+  if (!gst_video_frame_map (frame, &pad->buffer_vinfo, mixerpad->buffer,
           GST_MAP_READ)) {
     GST_WARNING_OBJECT (vagg, "Could not map input buffer");
     return FALSE;
