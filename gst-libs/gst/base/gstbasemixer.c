@@ -270,6 +270,30 @@ gst_base_mixer_aggregate (GstAggregator * agg, gboolean timeout)
   return ret;
 }
 
+static gboolean
+gst_base_mixer_check_eos_foreach (GstAggregator * agg,
+    GstAggregatorPad * aggpad, gpointer udata)
+{
+  gboolean *ret = udata;
+
+  if (!gst_aggregator_pad_is_eos (aggpad)) {
+    *ret = FALSE;
+    return FALSE;
+  }
+  return TRUE;
+}
+
+gboolean
+gst_base_mixer_check_eos (GstBaseMixer * bmixer)
+{
+  gboolean ret = TRUE;
+
+  gst_aggregator_iterate_sinkpads (GST_AGGREGATOR_CAST (bmixer),
+      gst_base_mixer_check_eos_foreach, &ret);
+
+  return ret;
+}
+
 static void
 gst_base_mixer_finalize (GObject * object)
 {

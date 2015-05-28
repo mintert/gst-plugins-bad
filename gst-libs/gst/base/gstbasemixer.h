@@ -159,6 +159,7 @@ struct _GstBaseMixerClass {
 GType gst_base_mixer_get_type(void);
 
 GstFlowReturn gst_base_mixer_finish_buffer (GstBaseMixer * bmixer, GstBuffer * buffer);
+gboolean gst_base_mixer_check_eos (GstBaseMixer * bmixer);
 
 G_END_DECLS
 
