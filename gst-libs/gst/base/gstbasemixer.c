@@ -72,13 +72,26 @@ gst_base_mixer_pad_get_times_for_buffer (GstBaseMixerPad * mixerpad,
   *end = GST_CLOCK_TIME_NONE;
 
   if (GST_BUFFER_PTS_IS_VALID (buf)) {
-    *start =
-        gst_segment_to_running_time (&(GST_AGGREGATOR_PAD_CAST
-            (mixerpad)->segment), GST_FORMAT_TIME,
-        GST_BUFFER_PTS (buf) + mixerpad->priv->offset);
-    if (GST_BUFFER_DURATION_IS_VALID (buf)) {
-      *end = *start + GST_BUFFER_DURATION (buf) - mixerpad->priv->offset;       /* TODO clip on segment */
-    }
+    GstSegment *segment;
+    GstClockTime ts, ts_end, c_ts, c_ts_end;
+
+    segment = &GST_AGGREGATOR_PAD_CAST (mixerpad)->segment;
+
+    ts = GST_BUFFER_PTS (buf);
+    if (GST_BUFFER_DURATION_IS_VALID (buf))
+      ts_end = ts + GST_BUFFER_DURATION (buf);
+    else
+      ts_end = GST_CLOCK_TIME_NONE;
+
+    ts += mixerpad->priv->offset;
+
+    if (!gst_segment_clip (segment, GST_FORMAT_TIME, ts, ts_end, &c_ts,
+            &c_ts_end))
+      return FALSE;
+
+    *start = gst_segment_to_running_time (segment, GST_FORMAT_TIME, c_ts);
+    if (GST_CLOCK_TIME_IS_VALID (c_ts_end))
+      *end = gst_segment_to_running_time (segment, GST_FORMAT_TIME, c_ts_end);
   }
   GST_DEBUG_OBJECT (mixerpad,
       "Pad has times: %" GST_TIME_FORMAT " - %" GST_TIME_FORMAT,
@@ -287,10 +300,52 @@ gst_base_mixer_mix (GstBaseMixer * bmixer, GstClockTime start, GstClockTime end)
   return bmixer_class->mix (bmixer, start, end);
 }
 
+static gboolean
+gst_base_mixer_pad_prepare_buffer_foreach (GstAggregator * agg,
+    GstAggregatorPad * aggpad, gpointer udata)
+{
+  GstBaseMixerPad *mixerpad = GST_BASE_MIXER_PAD_CAST (aggpad);
+  GstBuffer *buf;
+  gboolean ret = TRUE;
+
+  buf = gst_aggregator_pad_get_buffer (aggpad);
+  if (!buf)
+    return TRUE;
+
+  if (GST_BUFFER_PTS_IS_VALID (buf)) {
+    GstSegment *segment;
+    GstClockTime ts, ts_end, c_ts, c_ts_end;
+
+    segment = &aggpad->segment;
+
+    ts = GST_BUFFER_PTS (buf);
+    if (GST_BUFFER_DURATION_IS_VALID (buf))
+      ts_end = ts + GST_BUFFER_DURATION (buf);
+    else
+      ts_end = GST_CLOCK_TIME_NONE;
+
+    ts += mixerpad->priv->offset;
+
+    if (!gst_segment_clip (segment, GST_FORMAT_TIME, ts, ts_end, &c_ts,
+            &c_ts_end)) {
+      gst_aggregator_pad_drop_buffer (aggpad);
+      ret = FALSE;
+    }
+  }
+  gst_buffer_unref (buf);
+  return ret;
+}
+
 static GstFlowReturn
 gst_base_mixer_prepare (GstBaseMixer * bmixer, gboolean timeout)
 {
   GstBaseMixerClass *bmixer_class = GST_BASE_MIXER_GET_CLASS (bmixer);
+
+  /* FIXME move this into the 'find_time_alignment' to avoid yet
+   * another pad loop */
+  if (!gst_aggregator_iterate_sinkpads (GST_AGGREGATOR_CAST (bmixer),
+          gst_base_mixer_pad_prepare_buffer_foreach, NULL))
+    return GST_FLOW_NOT_HANDLED;
 
   if (bmixer_class->prepare)
     return bmixer_class->prepare (bmixer, timeout);
@@ -322,8 +377,14 @@ gst_base_mixer_aggregate (GstAggregator * agg, gboolean timeout)
   GstFlowReturn ret;
 
   ret = gst_base_mixer_prepare (bmixer, timeout);
-  if (ret != GST_FLOW_OK)
+  if (ret != GST_FLOW_OK) {
+
+    /* means we have to try again */
+    if (ret == GST_FLOW_NOT_HANDLED)
+      ret = GST_FLOW_OK;
+
     return ret;
+  }
 
   gst_base_mixer_find_time_alignment (bmixer, &start, &end);
   suggested_start = start;
