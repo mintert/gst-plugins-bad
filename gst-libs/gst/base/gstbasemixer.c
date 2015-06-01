@@ -43,6 +43,7 @@ typedef struct _GstBaseMixerTimeAlignment
 struct _GstBaseMixerPadPrivate
 {
   GstClockTime offset;
+  GstClockTime clipped_duration;
 };
 
 /***********************************
@@ -166,10 +167,10 @@ gst_base_mixer_pad_advance (GstBaseMixerPad * mixerpad, GstClockTime start,
     mixerpad->priv->offset += duration;
     if (GST_BUFFER_DURATION_IS_VALID (buffer)) {
 
-      g_assert (GST_BUFFER_DURATION (buffer) >= mixerpad->priv->offset);
+      g_assert (mixerpad->priv->clipped_duration >= mixerpad->priv->offset);
 
       /* It should never be smaller but let's leave it here for safety */
-      if (GST_BUFFER_DURATION (buffer) <= mixerpad->priv->offset) {
+      if (mixerpad->priv->clipped_duration <= mixerpad->priv->offset) {
         gst_aggregator_pad_drop_buffer (GST_AGGREGATOR_PAD_CAST (mixerpad));
         mixerpad->priv->offset = 0;
       }
@@ -308,6 +309,9 @@ gst_base_mixer_pad_prepare_buffer_foreach (GstAggregator * agg,
   GstBuffer *buf;
   gboolean ret = TRUE;
 
+  /* FIXME clipped_duration is being recalculated at every iteration */
+  mixerpad->priv->clipped_duration = GST_CLOCK_TIME_NONE;
+
   buf = gst_aggregator_pad_get_buffer (aggpad);
   if (!buf)
     return TRUE;
@@ -328,9 +332,11 @@ gst_base_mixer_pad_prepare_buffer_foreach (GstAggregator * agg,
 
     if (!gst_segment_clip (segment, GST_FORMAT_TIME, ts, ts_end, &c_ts,
             &c_ts_end)) {
+      GST_DEBUG_OBJECT (aggpad, "Buffer is out of segment, dropping");
       gst_aggregator_pad_drop_buffer (aggpad);
       ret = FALSE;
     }
+    mixerpad->priv->clipped_duration = c_ts_end - c_ts;
   }
   gst_buffer_unref (buf);
   return ret;
