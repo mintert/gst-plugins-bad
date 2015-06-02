@@ -70,6 +70,10 @@ struct _GstBaseMixerPad
 {
   GstAggregatorPad            parent;
 
+  GstBuffer                *  buffer;
+  GstClockTime                buffer_start_ts;
+  GstClockTime                buffer_end_ts;
+
   /* < Private > */
   GstBaseMixerPadPrivate   *  priv;
 
@@ -99,6 +103,8 @@ GType gst_base_mixer_pad_get_type           (void);
 /****************************
  * GstBaseMixerPad methods *
  ***************************/
+
+gboolean gst_base_mixer_pad_is_eos (GstBaseMixerPad * mixerpad);
 
 /*********************
  * GstBaseMixer API *

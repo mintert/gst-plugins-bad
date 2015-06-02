@@ -75,21 +75,19 @@ gst_test_sum_mixer_mix (GstBaseMixer * bmixer, GstClockTime start,
   iter = gst_element_iterate_sink_pads (GST_ELEMENT (bmixer));
   while (!done_iterating) {
     GValue value = { 0, };
-    GstAggregatorPad *pad;
+    GstBaseMixerPad *mixerpad;
 
     switch (gst_iterator_next (iter, &value)) {
       case GST_ITERATOR_OK:
-        pad = g_value_get_object (&value);
-        buf = gst_aggregator_pad_get_buffer (pad);
+        mixerpad = g_value_get_object (&value);
 
-        if (buf) {
-          gst_buffer_map (buf, &mapinfo, GST_MAP_READ);
+        if (mixerpad->buffer) {
+          gst_buffer_map (mixerpad->buffer, &mapinfo, GST_MAP_READ);
           sum += mapinfo.data[0];
-          gst_buffer_unmap (buf, &mapinfo);
-          gst_buffer_unref (buf);
+          gst_buffer_unmap (mixerpad->buffer, &mapinfo);
         }
 
-        if (gst_aggregator_pad_is_eos (pad) == FALSE)
+        if (gst_base_mixer_pad_is_eos (mixerpad) == FALSE)
           all_eos = FALSE;
 
         g_value_reset (&value);
