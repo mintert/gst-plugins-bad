@@ -222,16 +222,12 @@ push_data (gpointer user_data)
   GList *iter;
   GstFlowReturn flow;
   GstCaps *caps;
-  GstSegment segment;
 
   gst_pad_push_event (chain_data->srcpad, gst_event_new_stream_start ("test"));
 
   caps = gst_caps_new_empty_simple ("foo/x-bar");
   gst_pad_push_event (chain_data->srcpad, gst_event_new_caps (caps));
   gst_caps_unref (caps);
-
-  gst_segment_init (&segment, GST_FORMAT_TIME);
-  gst_pad_push_event (chain_data->srcpad, gst_event_new_segment (&segment));
 
   for (iter = chain_data->input_data; iter; iter = g_list_next (iter)) {
     if (GST_IS_BUFFER (iter->data)) {
@@ -446,6 +442,20 @@ typedef struct
   GstClockTime duration;
 } SumMixerBufferData;
 
+static GstBuffer *
+create_buffer (guint8 value, GstClockTime ts, GstClockTime duration)
+{
+  GstBuffer *buf;
+  guint8 *data = g_malloc (sizeof (guint8));
+  data[0] = value;
+
+  buf = gst_buffer_new_wrapped (data, 1);
+  GST_BUFFER_PTS (buf) = ts;
+  GST_BUFFER_DURATION (buf) = duration;
+
+  return buf;
+}
+
 static GList *
 input_list_from_string (const gchar * str)
 {
@@ -454,13 +464,8 @@ input_list_from_string (const gchar * str)
 
   while (*str != '\0') {
     if (*str >= '0' && *str <= '9') {
-      GstBuffer *buf;
-      guint8 *data = g_malloc (sizeof (guint8));
-      data[0] = *str - '0';
+      GstBuffer *buf = create_buffer (*str - '0', ts, GST_SECOND);
 
-      buf = gst_buffer_new_wrapped (data, 1);
-      GST_BUFFER_PTS (buf) = ts;
-      GST_BUFFER_DURATION (buf) = GST_SECOND;
       list = g_list_append (list, buf);
 
       ts += GST_SECOND;
@@ -489,13 +494,8 @@ input_list_from_buffer_data (const SumMixerBufferData * buffer_data)
       list = g_list_append (list, gap);
     } else {
 
-      GstBuffer *buf;
-      guint8 *data = g_malloc (sizeof (guint8));
-      data[0] = buffer_data[i].value;
-
-      buf = gst_buffer_new_wrapped (data, 1);
-      GST_BUFFER_PTS (buf) = ts;
-      GST_BUFFER_DURATION (buf) = buffer_data[i].duration;
+      GstBuffer *buf =
+          create_buffer (buffer_data[i].value, ts, buffer_data[i].duration);
       list = g_list_append (list, buf);
     }
 
@@ -513,9 +513,14 @@ run_test_from_buffer_data (const SumMixerBufferData ** input_data,
   GList **inputs = g_malloc0 (sizeof (GList *) * n_inputs);
   GList *expected_output = NULL;
   gint i;
+  GstSegment segment;
+
+  gst_segment_init (&segment, GST_FORMAT_TIME);
 
   for (i = 0; i < n_inputs; i++) {
-    inputs[i] = input_list_from_buffer_data (input_data[i]);
+    inputs[i] = g_list_append (inputs[i], gst_event_new_segment (&segment));
+    inputs[i] =
+        g_list_concat (inputs[i], input_list_from_buffer_data (input_data[i]));
   }
   expected_output = input_list_from_buffer_data (expected_output_data);
   run_test (inputs, n_inputs, expected_output);
@@ -527,12 +532,17 @@ static void
 run_test_from_strings (const gchar ** input_strings, gint n_inputs,
     const gchar * expected_output_string)
 {
+  GstSegment segment;
   GList **inputs = g_malloc0 (sizeof (GList *) * n_inputs);
   GList *expected_output = NULL;
   gint i;
 
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+
   for (i = 0; i < n_inputs; i++) {
-    inputs[i] = input_list_from_string (input_strings[i]);
+    inputs[i] = g_list_append (inputs[i], gst_event_new_segment (&segment));
+    inputs[i] =
+        g_list_concat (inputs[i], input_list_from_string (input_strings[i]));
   }
 
   expected_output = input_list_from_string (expected_output_string);
@@ -647,6 +657,158 @@ GST_START_TEST (test_mix_3_streams)
 
 GST_END_TEST;
 
+GST_START_TEST (test_mix_2_streams_different_segments)
+{
+  GList *input_1 = NULL;
+  GList *input_2 = NULL;
+  GList *output = NULL;
+  GList **inputs;
+  GstSegment segment;
+
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+
+  /* Input 1 */
+  input_1 = g_list_append (input_1, gst_event_new_segment (&segment));
+  input_1 = g_list_append (input_1, create_buffer (1, 0, 2 * GST_SECOND));
+  input_1 =
+      g_list_append (input_1, create_buffer (1, 2 * GST_SECOND,
+          2 * GST_SECOND));
+  input_1 = g_list_append (input_1, gst_event_new_eos ());
+
+  /* Input 2 has a different segment */
+  segment.start = GST_SECOND;
+  input_2 = g_list_append (input_2, gst_event_new_segment (&segment));
+  input_2 =
+      g_list_append (input_2, create_buffer (2, 1 * GST_SECOND,
+          2 * GST_SECOND));
+  input_2 =
+      g_list_append (input_2, create_buffer (2, 3 * GST_SECOND,
+          2 * GST_SECOND));
+  input_2 =
+      g_list_append (input_2, create_buffer (2, 5 * GST_SECOND,
+          1 * GST_SECOND));
+  input_2 = g_list_append (input_2, gst_event_new_eos ());
+
+  /* Output */
+  output = g_list_append (output, create_buffer (3, 0, 2 * GST_SECOND));
+  output =
+      g_list_append (output, create_buffer (3, 2 * GST_SECOND, 2 * GST_SECOND));
+  output =
+      g_list_append (output, create_buffer (2, 4 * GST_SECOND, 1 * GST_SECOND));
+  output = g_list_append (output, gst_event_new_eos ());
+
+  inputs = g_malloc (sizeof (GList *) * 2);
+  inputs[0] = input_1;
+  inputs[1] = input_2;
+
+  run_test (inputs, 2, output);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_mix_2_streams_one_is_late)
+{
+  GList *input_1 = NULL;
+  GList *input_2 = NULL;
+  GList *output = NULL;
+  GList **inputs;
+  GstSegment segment;
+
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+
+  /* Input 1 */
+  input_1 = g_list_append (input_1, gst_event_new_segment (&segment));
+  input_1 = g_list_append (input_1, create_buffer (1, 0, 2 * GST_SECOND));
+  input_1 =
+      g_list_append (input_1, create_buffer (1, 2 * GST_SECOND,
+          2 * GST_SECOND));
+  input_1 = g_list_append (input_1, gst_event_new_eos ());
+
+  /* Input 2 starts a bit late */
+  input_2 = g_list_append (input_2, gst_event_new_segment (&segment));
+  input_2 =
+      g_list_append (input_2, create_buffer (2, 1 * GST_SECOND,
+          1 * GST_SECOND));
+  input_2 =
+      g_list_append (input_2, create_buffer (2, 2 * GST_SECOND,
+          2 * GST_SECOND));
+  input_2 =
+      g_list_append (input_2, create_buffer (2, 4 * GST_SECOND,
+          1 * GST_SECOND));
+  input_2 = g_list_append (input_2, gst_event_new_eos ());
+
+  /* Output */
+  output = g_list_append (output, create_buffer (1, 0, 1 * GST_SECOND));
+  output =
+      g_list_append (output, create_buffer (3, 1 * GST_SECOND, 1 * GST_SECOND));
+  output =
+      g_list_append (output, create_buffer (3, 2 * GST_SECOND, 2 * GST_SECOND));
+  output =
+      g_list_append (output, create_buffer (2, 4 * GST_SECOND, 1 * GST_SECOND));
+  output = g_list_append (output, gst_event_new_eos ());
+
+  inputs = g_malloc (sizeof (GList *) * 2);
+  inputs[0] = input_1;
+  inputs[1] = input_2;
+
+  run_test (inputs, 2, output);
+}
+
+GST_END_TEST;
+
+
+GST_START_TEST (test_mix_sparse_stream)
+{
+  GList *input_1 = NULL;
+  GList *input_2 = NULL;
+  GList *output = NULL;
+  GList **inputs;
+  GstSegment segment;
+
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+
+  /* Input 1 */
+  input_1 = g_list_append (input_1, gst_event_new_segment (&segment));
+  input_1 = g_list_append (input_1, create_buffer (1, 0, 2 * GST_SECOND));
+  input_1 =
+      g_list_append (input_1, create_buffer (1, 2 * GST_SECOND,
+          2 * GST_SECOND));
+  input_1 =
+      g_list_append (input_1, create_buffer (1, 4 * GST_SECOND,
+          2 * GST_SECOND));
+  input_1 = g_list_append (input_1, gst_event_new_eos ());
+
+  /* Input 2 is sparse */
+  input_2 = g_list_append (input_2, gst_event_new_segment (&segment));
+  input_2 =
+      g_list_append (input_2, create_buffer (2, 1 * GST_SECOND,
+          1 * GST_SECOND));
+  input_2 =
+      g_list_append (input_2, create_buffer (2, 4 * GST_SECOND,
+          1 * GST_SECOND));
+  input_2 = g_list_append (input_2, gst_event_new_eos ());
+
+  /* Output */
+  output = g_list_append (output, create_buffer (1, 0, 1 * GST_SECOND));
+  output =
+      g_list_append (output, create_buffer (3, 1 * GST_SECOND, 1 * GST_SECOND));
+  output =
+      g_list_append (output, create_buffer (1, 2 * GST_SECOND, 2 * GST_SECOND));
+  output =
+      g_list_append (output, create_buffer (3, 4 * GST_SECOND, 1 * GST_SECOND));
+  output =
+      g_list_append (output, create_buffer (1, 5 * GST_SECOND, 1 * GST_SECOND));
+  output = g_list_append (output, gst_event_new_eos ());
+
+  inputs = g_malloc (sizeof (GList *) * 2);
+  inputs[0] = input_1;
+  inputs[1] = input_2;
+
+  run_test (inputs, 2, output);
+}
+
+GST_END_TEST;
+
 
 static Suite *
 gst_base_mixer_suite (void)
@@ -670,6 +832,15 @@ gst_base_mixer_suite (void)
   /* Tests where buffer durations are flexible */
   tcase_add_test (general, test_mix_2_streams);
   tcase_add_test (general, test_mix_3_streams);
+
+  /* Tests with late streams */
+  tcase_add_test (general, test_mix_2_streams_one_is_late);
+
+  /* Tests that involve segments */
+  tcase_add_test (general, test_mix_2_streams_different_segments);
+
+  /* Tests with sparse streams */
+  tcase_add_test (general, test_mix_sparse_stream);
 
   return suite;
 }
