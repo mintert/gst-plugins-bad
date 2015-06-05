@@ -81,7 +81,7 @@ gst_test_sum_mixer_mix (GstBaseMixer * bmixer, GstClockTime start,
       case GST_ITERATOR_OK:
         mixerpad = g_value_get_object (&value);
 
-        if (mixerpad->buffer) {
+        if (gst_base_mixer_pad_should_mix (mixerpad, start, end)) {
           gst_buffer_map (mixerpad->buffer, &mapinfo, GST_MAP_READ);
           sum += mapinfo.data[0];
           gst_buffer_unmap (mixerpad->buffer, &mapinfo);

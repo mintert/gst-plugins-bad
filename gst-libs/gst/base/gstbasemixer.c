@@ -151,6 +151,21 @@ gst_base_mixer_pad_advance (GstBaseMixerPad * mixerpad, GstClockTime start,
   }
 }
 
+gboolean
+gst_base_mixer_pad_should_mix (GstBaseMixerPad * mixerpad, GstClockTime start,
+    GstClockTime end)
+{
+  GstClockTime dur;
+
+  if (!mixerpad->buffer)
+    return FALSE;
+
+  dur = gst_base_mixer_pad_get_duration_within_times (mixerpad, start, end);
+  if (dur == 0)
+    return FALSE;
+  return TRUE;
+}
+
 
 /*************************************
  * GstBaseMixer implementation  *
@@ -185,12 +200,27 @@ gst_base_mixer_find_time_alignment_foreach (GstAggregator * agg,
 
   if (gst_base_mixer_pad_get_times (mixerpad, &start, &end)) {
     if (GST_CLOCK_TIME_IS_VALID (start)) {
-      if (start < talign->start)
+
+      if (start < talign->start) {
+        /* This buffer is before our current alignment, it sets
+         * the new start time and the new end time is
+         * MIN (current_start_time, buffer_end_time)
+         */
+        if (GST_CLOCK_TIME_IS_VALID (end)) {
+          talign->end = MIN (talign->end, end);
+        }
         talign->start = start;
 
-      if (GST_CLOCK_TIME_IS_VALID (end)) {
-        if (end < talign->end)
-          talign->end = end;
+      } else if (start > talign->start) {
+        /* This buffer starts after our current
+         * alignment, so its start defines the new
+         * end time */
+        talign->end = MIN (talign->end, start);
+      } else {
+        if (GST_CLOCK_TIME_IS_VALID (end)) {
+          if (end < talign->end)
+            talign->end = end;
+        }
       }
     }
   }
