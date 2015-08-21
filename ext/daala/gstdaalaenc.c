@@ -97,8 +97,6 @@ static GstFlowReturn daala_enc_pre_push (GstVideoEncoder * benc,
 static GstFlowReturn daala_enc_finish (GstVideoEncoder * enc);
 static gboolean daala_enc_propose_allocation (GstVideoEncoder * encoder,
     GstQuery * query);
-static gboolean gst_daala_enc_sink_query (GstVideoEncoder * encoder,
-    GstQuery * query);
 
 static GstCaps *daala_enc_getcaps (GstVideoEncoder * encoder, GstCaps * filter);
 static void daala_enc_get_property (GObject * object, guint prop_id,
@@ -147,7 +145,6 @@ gst_daala_enc_class_init (GstDaalaEncClass * klass)
   gstvideo_encoder_class->pre_push = GST_DEBUG_FUNCPTR (daala_enc_pre_push);
   gstvideo_encoder_class->finish = GST_DEBUG_FUNCPTR (daala_enc_finish);
   gstvideo_encoder_class->getcaps = GST_DEBUG_FUNCPTR (daala_enc_getcaps);
-  gstvideo_encoder_class->sink_query = GST_DEBUG_FUNCPTR (daala_enc_sink_query);
   gstvideo_encoder_class->propose_allocation =
       GST_DEBUG_FUNCPTR (daala_enc_propose_allocation);
 
@@ -293,32 +290,6 @@ daala_enc_get_supported_formats (void)
   daala_info_clear (&info);
 
   return string == NULL ? NULL : g_string_free (string, FALSE);
-}
-
-static gboolean
-gst_daala_enc_sink_query (GstVideoEncoder * encoder, GstQuery * query)
-{
-  gboolean res;
-
-  switch (GST_QUERY_TYPE (query)) {
-    case GST_QUERY_ACCEPT_CAPS:{
-      GstCaps *acceptable, *caps;
-
-      acceptable = daala_enc_get_supported_formats ();
-      gst_query_parse_accept_caps (query, &caps);
-
-      gst_query_set_accept_caps_result (query,
-          gst_caps_is_subset (caps, acceptable));
-      gst_caps_unref (acceptable);
-      res = TRUE;
-    }
-      break;
-    default:
-      res = GST_VIDEO_ENCODER_CLASS (parent_class)->sink_query (encoder, query);
-      break;
-  }
-
-  return res;
 }
 
 static GstCaps *
