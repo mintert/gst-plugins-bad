@@ -92,7 +92,6 @@ gst_siren_enc_class_init (GstSirenEncClass * klass)
 static void
 gst_siren_enc_init (GstSirenEnc * enc)
 {
-  GST_PAD_SET_ACCEPT_TEMPLATE (GST_AUDIO_ENCODER_SINK_PAD (enc));
 }
 
 static gboolean
