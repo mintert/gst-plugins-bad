@@ -230,7 +230,8 @@ static gboolean gst_adaptive_demux_expose_streams (GstAdaptiveDemux * demux,
     gboolean first_and_live);
 static gboolean gst_adaptive_demux_is_live (GstAdaptiveDemux * demux);
 static GstFlowReturn gst_adaptive_demux_stream_seek (GstAdaptiveDemux * demux,
-    GstAdaptiveDemuxStream * stream, GstClockTime ts);
+    GstAdaptiveDemuxStream * stream, gboolean forward, GstSeekFlags flags,
+    GstClockTime ts, GstClockTime * final_ts);
 static gboolean gst_adaptive_demux_stream_has_next_fragment (GstAdaptiveDemux *
     demux, GstAdaptiveDemuxStream * stream);
 static gboolean gst_adaptive_demux_stream_select_bitrate (GstAdaptiveDemux *
@@ -2686,7 +2687,8 @@ gst_adaptive_demux_stream_download_loop (GstAdaptiveDemuxStream * stream)
       period_start = gst_adaptive_demux_get_period_start_time (demux);
 
       /* TODO check return */
-      gst_adaptive_demux_stream_seek (demux, stream, ts);
+      gst_adaptive_demux_stream_seek (demux, stream, demux->segment.rate >= 0,
+          0, ts, &ts);
 
       segment.position = ts - period_start + offset;
     }
@@ -3050,12 +3052,13 @@ gst_adaptive_demux_is_live (GstAdaptiveDemux * demux)
 /* must be called with manifest_lock taken */
 static GstFlowReturn
 gst_adaptive_demux_stream_seek (GstAdaptiveDemux * demux,
-    GstAdaptiveDemuxStream * stream, GstClockTime ts)
+    GstAdaptiveDemuxStream * stream, gboolean forward, GstSeekFlags flags,
+    GstClockTime ts, GstClockTime * final_ts)
 {
   GstAdaptiveDemuxClass *klass = GST_ADAPTIVE_DEMUX_GET_CLASS (demux);
 
   if (klass->stream_seek)
-    return klass->stream_seek (stream, ts);
+    return klass->stream_seek (stream, forward, flags, ts, final_ts);
   return GST_FLOW_ERROR;
 }
 
