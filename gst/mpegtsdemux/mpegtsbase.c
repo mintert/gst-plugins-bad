@@ -421,22 +421,29 @@ mpegts_base_free_program (MpegTSBaseProgram * program)
   g_free (program);
 }
 
-void
-mpegts_base_deactivate_and_free_program (MpegTSBase * base,
-    MpegTSBaseProgram * program)
-{
-  GST_DEBUG_OBJECT (base, "program_number : %d", program->program_number);
-
-  mpegts_base_deactivate_program (base, program);
-  mpegts_base_free_program (program);
-}
-
 static void
 mpegts_base_remove_program (MpegTSBase * base, gint program_number)
 {
   GST_DEBUG_OBJECT (base, "program_number : %d", program_number);
 
   g_hash_table_remove (base->programs, GINT_TO_POINTER (program_number));
+}
+
+void
+mpegts_base_deactivate_and_free_program (MpegTSBase * base,
+    MpegTSBaseProgram * program)
+{
+  MpegTSBaseProgram *stored_program;
+  GST_DEBUG_OBJECT (base, "program_number : %d", program->program_number);
+
+  mpegts_base_deactivate_program (base, program);
+  /* check if this program is still in ->programs */
+  stored_program = mpegts_base_get_program (base, program->program_number);
+
+  if (stored_program && stored_program == program)
+    mpegts_base_remove_program (base, program->program_number);
+  else
+    mpegts_base_free_program (program);
 }
 
 static guint32
