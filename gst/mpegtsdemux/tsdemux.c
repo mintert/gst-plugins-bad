@@ -287,7 +287,7 @@ gst_ts_demux_program_stopped (MpegTSBase * base, MpegTSBaseProgram * program);
 static gboolean
 gst_ts_demux_can_remove_program (MpegTSBase * base,
     MpegTSBaseProgram * program);
-static void gst_ts_demux_reset (MpegTSBase * base);
+static void gst_ts_demux_reset (MpegTSBase * base, gboolean remove_streams);
 static GstFlowReturn
 gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
     GstMpegtsSection * section);
@@ -393,7 +393,7 @@ gst_ts_demux_class_init (GstTSDemuxClass * klass)
 }
 
 static void
-gst_ts_demux_reset (MpegTSBase * base)
+gst_ts_demux_reset (MpegTSBase * base, gboolean remove_streams)
 {
   GstTSDemux *demux = (GstTSDemux *) base;
 
@@ -409,7 +409,7 @@ gst_ts_demux_reset (MpegTSBase * base)
     demux->global_tags = NULL;
   }
 
-  if (demux->previous_program) {
+  if (demux->previous_program && remove_streams) {
     mpegts_base_deactivate_and_free_program (base, demux->previous_program);
     demux->previous_program = NULL;
   }
@@ -433,7 +433,7 @@ gst_ts_demux_init (GstTSDemux * demux)
   demux->flowcombiner = gst_flow_combiner_new ();
   demux->requested_program_number = -1;
   demux->program_number = -1;
-  gst_ts_demux_reset (base);
+  gst_ts_demux_reset (base, TRUE);
 }
 
 

@@ -118,7 +118,7 @@ static gboolean push_event (MpegTSBase * base, GstEvent * event);
 
 #define mpegts_parse_parent_class parent_class
 G_DEFINE_TYPE (MpegTSParse2, mpegts_parse, GST_TYPE_MPEGTS_BASE);
-static void mpegts_parse_reset (MpegTSBase * base);
+static void mpegts_parse_reset (MpegTSBase * base, gboolean remove_streams);
 static GstFlowReturn mpegts_parse_input_done (MpegTSBase * base,
     GstBuffer * buffer);
 static GstFlowReturn
@@ -212,7 +212,7 @@ mpegts_parse_init (MpegTSParse2 * parse)
 }
 
 static void
-mpegts_parse_reset (MpegTSBase * base)
+mpegts_parse_reset (MpegTSBase * base, gboolean remove_streams)
 {
   MpegTSParse2 *parse = (MpegTSParse2 *) base;
 

@@ -91,6 +91,8 @@ static gboolean mpegts_base_parse_atsc_mgt (MpegTSBase * base,
     GstMpegtsSection * section);
 static gboolean remove_each_program (gpointer key, MpegTSBaseProgram * program,
     MpegTSBase * base);
+static gboolean check_and_remove_each_program (gpointer key,
+    MpegTSBaseProgram * program, MpegTSBase * base);
 
 static void
 _extra_init (void)
@@ -173,7 +175,7 @@ mpegts_base_get_property (GObject * object, guint prop_id,
 
 
 static void
-mpegts_base_reset (MpegTSBase * base)
+mpegts_base_reset (MpegTSBase * base, gboolean force_stream_removal)
 {
   MpegTSBaseClass *klass = GST_MPEGTS_BASE_GET_CLASS (base);
 
@@ -208,11 +210,15 @@ mpegts_base_reset (MpegTSBase * base)
   base->seen_pat = FALSE;
   base->seek_offset = -1;
 
-  g_hash_table_foreach_remove (base->programs, (GHRFunc) remove_each_program,
-      base);
+  if (force_stream_removal)
+    g_hash_table_foreach_remove (base->programs, (GHRFunc) remove_each_program,
+        base);
+  else
+    g_hash_table_foreach_remove (base->programs,
+        (GHRFunc) check_and_remove_each_program, base);
 
   if (klass->reset)
-    klass->reset (base);
+    klass->reset (base, force_stream_removal);
 }
 
 static void
@@ -240,7 +246,7 @@ mpegts_base_init (MpegTSBase * base)
   base->push_data = TRUE;
   base->push_section = TRUE;
 
-  mpegts_base_reset (base);
+  mpegts_base_reset (base, TRUE);
 }
 
 static void
@@ -897,7 +903,7 @@ mpegts_base_apply_pmt (MpegTSBase * base, GstMpegtsSection * section)
     g_hash_table_insert (base->programs,
         GINT_TO_POINTER (program_number), program);
 
-    /* Desactivate the old program */
+    /* Deactivate the old program */
     /* FIXME : THIS IS BREAKING THE STREAM SWITCHING LOGIC !
      *  */
     if (klass->can_remove_program (base, old_program)) {
@@ -1058,6 +1064,20 @@ remove_each_program (gpointer key, MpegTSBaseProgram * program,
   return TRUE;
 }
 
+static gboolean
+check_and_remove_each_program (gpointer key, MpegTSBaseProgram * program,
+    MpegTSBase * base)
+{
+  MpegTSBaseClass *klass = GST_MPEGTS_BASE_GET_CLASS (base);
+
+  if (klass->can_remove_program (base, program)) {
+    mpegts_base_deactivate_program (base, program);
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
 static inline GstFlowReturn
 mpegts_base_drain (MpegTSBase * base)
 {
@@ -1107,6 +1127,9 @@ mpegts_base_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
       res = GST_MPEGTS_BASE_GET_CLASS (base)->push_event (base, event);
       break;
     case GST_EVENT_STREAM_START:
+      mpegts_base_drain (base);
+      mpegts_base_flush (base, TRUE);
+      mpegts_base_reset (base, FALSE);
       gst_event_unref (event);
       break;
     case GST_EVENT_CAPS:
@@ -1604,7 +1627,7 @@ mpegts_base_change_state (GstElement * element, GstStateChange transition)
 
   switch (transition) {
     case GST_STATE_CHANGE_READY_TO_PAUSED:
-      mpegts_base_reset (base);
+      mpegts_base_reset (base, TRUE);
       break;
     default:
       break;
@@ -1614,7 +1637,7 @@ mpegts_base_change_state (GstElement * element, GstStateChange transition)
 
   switch (transition) {
     case GST_STATE_CHANGE_PAUSED_TO_READY:
-      mpegts_base_reset (base);
+      mpegts_base_reset (base, TRUE);
       if (base->mode != BASE_MODE_PUSHING)
         base->mode = BASE_MODE_SCANNING;
       break;
