@@ -2868,10 +2868,18 @@ gst_adaptive_demux_stream_download_loop (GstAdaptiveDemuxStream * stream)
       GST_DEBUG_OBJECT (stream->pad, "EOS, checking to stop download loop");
       /* we push the EOS after releasing the object lock */
       if (gst_adaptive_demux_is_live (demux)) {
-        if (gst_adaptive_demux_stream_wait_manifest_update (demux, stream)) {
-          goto end;
+        if (gst_adaptive_demux_has_next_period (demux)) {
+          gst_task_stop (stream->download_task);
+          if (gst_adaptive_demux_combine_flows (demux) == GST_FLOW_EOS) {
+            gst_adaptive_demux_advance_period (demux);
+            ret = GST_FLOW_OK;
+          }
+        } else {
+          if (gst_adaptive_demux_stream_wait_manifest_update (demux, stream)) {
+            goto end;
+          }
+          gst_task_stop (stream->download_task);
         }
-        gst_task_stop (stream->download_task);
       } else {
         gst_task_stop (stream->download_task);
         if (gst_adaptive_demux_combine_flows (demux) == GST_FLOW_EOS) {
