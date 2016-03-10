@@ -1831,7 +1831,7 @@ gst_dvbsrc_read_device (GstDvbSrc * object, int size, GstBuffer ** buffer)
     return GST_FLOW_ERROR;
 
   gst_buffer_map (buf, &map, GST_MAP_WRITE);
-  while (count < size) {
+  while (count < size && !object->need_tune) {
     ret_val = gst_poll_wait (object->poll, timeout);
     GST_LOG_OBJECT (object, "select returned %d", ret_val);
     if (G_UNLIKELY (ret_val < 0)) {
@@ -1861,10 +1861,17 @@ gst_dvbsrc_read_device (GstDvbSrc * object, int size, GstBuffer ** buffer)
         count = count + nread;
     }
   }
-  gst_buffer_unmap (buf, &map);
-  gst_buffer_resize (buf, 0, count);
 
-  *buffer = buf;
+  gst_buffer_unmap (buf, &map);
+  if (count > 0) {
+    gst_buffer_resize (buf, 0, count);
+    *buffer = buf;
+  } else if (count == 0) {
+    g_assert (object->need_tune);
+    gst_buffer_unref (buf);
+    /* ask to retry */
+    return GST_FLOW_CUSTOM_SUCCESS;
+  }
 
   return GST_FLOW_OK;
 
@@ -1898,8 +1905,14 @@ gst_dvbsrc_create (GstPushSrc * element, GstBuffer ** buf)
   buffer_size = DEFAULT_BUFFER_SIZE;
 
   /* device can not be tuned during read */
+restart:
   g_mutex_lock (&object->tune_mutex);
-
+  while (object->need_tune) {
+    g_cond_broadcast (&object->read_cond);
+    g_cond_wait (&object->tune_cond, &object->tune_mutex);
+  }
+  object->reading = TRUE;
+  g_mutex_unlock (&object->tune_mutex);
 
   if (object->fd_dvr > -1) {
     /* --- Read TS from DVR device --- */
@@ -1913,7 +1926,15 @@ gst_dvbsrc_create (GstPushSrc * element, GstBuffer ** buf)
     }
   }
 
+  g_mutex_lock (&object->tune_mutex);
+  object->reading = FALSE;
+  g_cond_broadcast (&object->read_cond);
   g_mutex_unlock (&object->tune_mutex);
+
+  /* basesrc doesn't have a retry-read return, so we
+   * improvise here */
+  if (retval == GST_FLOW_CUSTOM_SUCCESS)
+    goto restart;
 
   return retval;
 
@@ -2227,8 +2248,6 @@ gst_dvbsrc_tune_fe (GstDvbSrc * object)
 
   gst_dvbsrc_unset_pes_filters (object);
 
-  g_mutex_lock (&object->tune_mutex);
-
   gst_poll_fd_init (&fe_fd);
   fe_fd.fd = object->fd_frontend;
   poll_set = gst_poll_new (TRUE);
@@ -2308,7 +2327,6 @@ gst_dvbsrc_tune_fe (GstDvbSrc * object)
   GST_DEBUG_OBJECT (object, "Successfully set frontend tuning params");
 
   gst_poll_free (poll_set);
-  g_mutex_unlock (&object->tune_mutex);
   return TRUE;
 
 fail_with_signal:
@@ -2316,7 +2334,6 @@ fail_with_signal:
 fail:
   GST_WARNING_OBJECT (object, "Could not tune to desired frequency");
   gst_poll_free (poll_set);
-  g_mutex_unlock (&object->tune_mutex);
   return FALSE;
 }
 
@@ -2566,6 +2583,13 @@ gst_dvbsrc_set_fe_params (GstDvbSrc * object, struct dtv_properties *props)
 static gboolean
 gst_dvbsrc_tune (GstDvbSrc * object)
 {
+  /* make sure it is not reading */
+  g_mutex_lock (&object->tune_mutex);
+  object->need_tune = TRUE;
+  while (object->reading) {
+    g_cond_wait (&object->read_cond, &object->tune_mutex);
+  }
+
   /* found in mail archive on linuxtv.org
    * What works well for us is:
    * - first establish a TS feed (i.e. tune the frontend and check for success)
@@ -2579,6 +2603,11 @@ gst_dvbsrc_tune (GstDvbSrc * object)
   }
 
   gst_dvbsrc_set_pes_filters (object);
+
+  gst_base_src_require_stream_start (GST_BASE_SRC_CAST (object));
+  object->need_tune = FALSE;
+  g_cond_broadcast (&object->tune_cond);
+  g_mutex_unlock (&object->tune_mutex);
 
   return TRUE;
 }

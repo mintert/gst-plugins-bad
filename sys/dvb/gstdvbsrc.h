@@ -62,6 +62,9 @@ struct _GstDvbSrc
   GstPushSrc element;
 
   GMutex tune_mutex;
+  GCond read_cond;
+  GCond tune_cond;
+  gboolean reading;
   gboolean need_tune;
 
   guchar delsys;
