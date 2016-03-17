@@ -1772,8 +1772,8 @@ gst_ts_demux_can_remove_program (MpegTSBase * base, MpegTSBaseProgram * program)
   /* If it's our current active program, we return FALSE, we'll deactivate it
    * ourselves when the next program gets activated */
   if (demux->program == program) {
-    GST_DEBUG
-        ("Attempting to remove current program, delaying until new program gets activated");
+    GST_DEBUG_OBJECT (base,
+        "Attempting to remove current program, delaying until new program gets activated");
     demux->previous_program = program;
     demux->program_number = -1;
     return FALSE;
