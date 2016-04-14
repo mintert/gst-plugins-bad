@@ -1075,6 +1075,7 @@ write_error:
         ret = GST_FLOW_ERROR;
         break;
       }
+        /* FIXME error might not be from system errors, errno will make no sense */
       default:{
         GST_ELEMENT_ERROR (sink, RESOURCE, WRITE,
             ("Error while writing to file \"%s\".", filename),
