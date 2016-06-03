@@ -117,7 +117,9 @@ gst_representation_render (GstRepresentation * rep, xmlTextWriterPtr writer)
   /* Start Representation */
   if (!gst_media_presentation_start_element (writer, "Representation"))
     return FALSE;
-
+  /* set static encoder profile and level, for now (constrained-baseline 4.0) */
+  gst_media_presentation_write_string_attribute (writer, "codecs",
+      "avc1.42001f");
   if (!gst_media_presentation_write_uint32_attribute (writer, "bandwidth",
           rep->bandwidth))
     return FALSE;

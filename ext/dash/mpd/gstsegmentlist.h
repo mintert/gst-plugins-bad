@@ -40,6 +40,7 @@ struct _GstMediaSegment
   int index;
   guint64 start_ts;
   guint64 duration;
+  guint64 end_time;
   guint64 offset;
   guint64 size;
 };

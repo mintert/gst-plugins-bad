@@ -39,7 +39,7 @@ typedef enum MediaPresentationType
 struct _GstMediaPresentation
 {
   guint64 availabilityStartTime;
-  guint64 availabilityEndTime;
+  guint64 timeShiftBufferDepth;
   guint64 mediaPresentationDuration;
   guint64 minimumUpdatePeriodMPD;
   guint64 minBufferTime;

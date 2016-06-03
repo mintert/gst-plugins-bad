@@ -273,6 +273,8 @@ gst_dash_manager_add_headers (GstStreamsManager * b_manager,
 
   manager = GST_DASH_MANAGER (b_manager);
 
+  manager->mpd->availabilityStartTime = (int) time (NULL);
+
   pad_name = gst_pad_get_name (pad);
   meta = gst_buffer_get_fragment_meta (fragment);
   ret = gst_media_presentation_set_init_segment (manager->mpd, pad_name,

@@ -179,6 +179,30 @@ quit:
 }
 
 gboolean
+gst_media_presentation_write_date_attribute (xmlTextWriterPtr writer,
+    const gchar * name, guint64 value)
+{
+  gchar *value_str;
+  gboolean ret;
+  time_t t;
+  struct tm tm;
+
+  if (value == 0)
+    return TRUE;
+
+  t = (time_t) value;
+  tm = *gmtime (&t);
+
+  value_str = g_strdup_printf ("%4d-%02d-%02dT%02d:%02d:%02dZ",
+      tm.tm_year + 1900,
+      tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+  ret = gst_media_presentation_write_attribute (writer, name, value_str);
+  g_free (value_str);
+  return ret;
+}
+
+gboolean
 gst_media_presentation_write_uint32_attribute (xmlTextWriterPtr writer,
     const gchar * name, guint32 value)
 {

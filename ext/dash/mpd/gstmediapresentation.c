@@ -24,11 +24,11 @@
 #include "gstmediapresentation.h"
 #include "gstxmlhelper.h"
 
-#define SCHEMA_URL "http://www.w3.org/2001/XMLSchema"
-#define SCHEMA_2011 "urn:mpeg:mpegB:schema:DASH:MPD:DIS2011"
+#define SCHEMA_URL "http://www.w3.org/2011/XMLSchema-instance"
+#define SCHEMA_2011 "urn:mpeg:dash:schema:mpd:2011"
 #define PROFILE_ISOFF_ONDEMAND "urn:mpeg:dash:profile:isoff-on-demand:2011"
 #define PROFILE_MPEGTS_ONDEMAND "urn:mpeg:dash:profile:mp2t-on-demand:2011"
-#define PROFILE_ISOFF_LIVE "urn:mpeg:dash:profile:isoff-live:2011"
+#define PROFILE_ISOFF_LIVE "urn:mpeg:dash:profile:isoff-main:2011"
 #define PROFILE_MPEGTS_LIVE "urn:mpeg:dash:profile:mp2t-live:2011"
 #define TYPE_ONDEMAND "static"
 #define TYPE_LIVE "dynamic"
@@ -49,7 +49,7 @@ gst_media_presentation_new (MediaPresentationType type, gboolean use_ranges,
 
   mpd = g_new0 (GstMediaPresentation, 1);
   mpd->availabilityStartTime = GST_CLOCK_TIME_NONE;
-  mpd->availabilityEndTime = GST_CLOCK_TIME_NONE;
+  mpd->timeShiftBufferDepth = GST_CLOCK_TIME_NONE;
   mpd->mediaPresentationDuration = GST_CLOCK_TIME_NONE;
   mpd->minimumUpdatePeriodMPD = GST_CLOCK_TIME_NONE;
   mpd->minBufferTime = min_buffer_time;
@@ -278,6 +278,8 @@ gst_media_presentation_render_type (GstMediaPresentation * mpd)
   switch (mpd->type) {
     case MEDIA_PRESENTATION_TYPE_ONDEMAND:
       return TYPE_ONDEMAND;
+    case MEDIA_PRESENTATION_TYPE_LIVE:
+      return TYPE_LIVE;
     default:
       return NULL;
   }
@@ -289,6 +291,8 @@ gst_media_presentation_render (GstMediaPresentation * mpd)
   xmlTextWriterPtr writer = NULL;
   xmlBufferPtr buf = NULL;
   gchar *mpd_str = NULL;
+
+  mpd->timeShiftBufferDepth = gst_media_presentation_get_duration (mpd);
 
   /* Create a new XML buffer, to which the XML document will be
    * written */
@@ -332,6 +336,10 @@ gst_media_presentation_render (GstMediaPresentation * mpd)
           "xsi:schemaLocation", SCHEMA_2011))
     goto error;
 
+  if (!gst_media_presentation_write_time_attribute (writer,
+          "timeShiftBufferDepth", mpd->timeShiftBufferDepth))
+    goto error;
+
   if (!gst_media_presentation_write_string_list_attribute (writer, "profiles",
           mpd->profiles))
     goto error;
@@ -345,18 +353,26 @@ gst_media_presentation_render (GstMediaPresentation * mpd)
     goto error;
 
   if (!gst_media_presentation_write_time_seconds_attribute (writer,
+          "suggestedPresentationDelay", mpd->minBufferTime * 2))
+    goto error;
+
+  if (!gst_media_presentation_write_time_seconds_attribute (writer,
           "minBufferTime", mpd->minBufferTime))
     goto error;
 
   if (!gst_media_presentation_write_time_seconds_attribute (writer,
-          "minimumUpdatePeriodMPD", mpd->minimumUpdatePeriodMPD))
+          "minimumUpdatePeriod", mpd->minBufferTime))
+    goto error;
+
+  if (!gst_media_presentation_write_date_attribute (writer,
+          "availabilityStartTime", mpd->availabilityStartTime))
+    goto error;
+
+  if (!gst_media_presentation_write_date_attribute (writer,
+          "publishTime", mpd->availabilityStartTime))
     goto error;
 
   /* FIXME: To be implemented
-     if (!gst_media_presentation_write_date_attribute (writer,
-     "availabilityStartTime", mpd->availabilityStartTime))
-     goto error;
-
      if (!gst_media_presentation_write_date_attribute (writer,
      "availabilityEndTime", mpd->availabilityEndTime))
      goto error;
