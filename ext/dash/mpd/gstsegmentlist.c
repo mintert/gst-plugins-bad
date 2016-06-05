@@ -164,6 +164,10 @@ gst_segment_list_render_template (GstSegmentList * info,
           info->segment_template))
     return FALSE;
 
+  if (!gst_media_presentation_write_string_attribute (writer, "startNumber",
+          "0"))
+    return FALSE;
+
   if (!gst_media_presentation_write_uint32_attribute (writer, "timescale",
           1000))
     return FALSE;
