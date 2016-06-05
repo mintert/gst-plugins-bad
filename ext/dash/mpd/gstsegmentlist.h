@@ -55,11 +55,12 @@ struct _GstSegmentList
   GList *base_urls;
   gboolean use_ranges;
   GstMediaSegment *init_segment;
+  gchar *segment_template;
   GList *segments;
   guint fragment_duration;
 };
 
-GstSegmentList *gst_segment_list_new           (guint fragment_duration, gboolean use_ranges);
+GstSegmentList *gst_segment_list_new           (guint fragment_duration, gboolean use_ranges, gchar *segment_template);
 
 void gst_segment_list_free                     (GstSegmentList * segment_list);
 
@@ -73,6 +74,9 @@ void gst_segment_list_add_base_url             (GstSegmentList * segment_list,
                                                 gchar *url);
 
 gboolean gst_segment_list_render               (GstSegmentList * segment_list,
+                                                xmlTextWriterPtr writer);
+
+gboolean gst_segment_list_render_template      (GstSegmentList * segment_list,
                                                 xmlTextWriterPtr writer);
 
 GstMediaSegment * gst_media_segment_new        (gchar * url, guint index,

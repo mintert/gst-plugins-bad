@@ -154,6 +154,45 @@ gst_period_get_duration (GstPeriod * period)
 }
 
 gboolean
+gst_period_render_template (GstPeriod * period, xmlTextWriterPtr writer)
+{
+  GHashTableIter iter;
+  GstAdaptationSet *adaptation_set;
+  gchar *id;
+
+  /* Start Period */
+  if (!gst_media_presentation_start_element (writer, "Period"))
+    return FALSE;
+
+  /* Write Period attributes */
+  if (!gst_media_presentation_write_time_seconds_attribute (writer, "start",
+          period->start))
+    return FALSE;
+  if (!gst_media_presentation_write_time_seconds_attribute (writer,
+          "minBufferTime", period->minBufferTime))
+    return FALSE;
+  if (!gst_media_presentation_write_bool_attribute (writer,
+          "segmentAlignment", period->segmentAlignment))
+    return FALSE;
+  if (!gst_media_presentation_write_bool_attribute (writer,
+          "bitstreamSwitching", period->bitstreamSwitching))
+    return FALSE;
+
+  /* Add adaptation_sets */
+  g_hash_table_iter_init (&iter, period->adaptation_sets);
+  while (g_hash_table_iter_next (&iter, (void *) &id, (void *) &adaptation_set)) {
+    if (!gst_adaptation_set_render_template (adaptation_set, writer))
+      return FALSE;
+  }
+
+  /* End period */
+  if (!gst_media_presentation_end_element (writer))
+    return FALSE;
+
+  return TRUE;
+}
+
+gboolean
 gst_period_render (GstPeriod * period, xmlTextWriterPtr writer)
 {
   GHashTableIter iter;

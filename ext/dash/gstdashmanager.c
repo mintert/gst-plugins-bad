@@ -40,6 +40,8 @@ static gboolean gst_dash_manager_remove_stream (GstStreamsManager * manager,
     GstPad * pad, GstMediaRepFile ** rep_file);
 static gchar *gst_dash_manager_fragment_name (GstStreamsManager * manager,
     GstPad * pad, guint index);
+static gchar *gst_dash_manager_segment_template (GstStreamsManager * manager,
+    GstPad * pad);
 static gchar *gst_dash_manager_headers_name (GstStreamsManager * manager,
     GstPad * pad);
 static gboolean gst_dash_manager_add_fragment (GstStreamsManager * manager,
@@ -132,6 +134,7 @@ gst_dash_manager_add_stream (GstStreamsManager * b_manager, GstPad * pad,
   guint bitrate = 0;
   gdouble framerate = 0;
   gchar *pad_name;
+  gchar *segment_template;
   gboolean ret;
 
   manager = GST_DASH_MANAGER (b_manager);
@@ -180,11 +183,13 @@ gst_dash_manager_add_stream (GstStreamsManager * b_manager, GstPad * pad,
     type = STREAM_TYPE_SUBTITLE;
   }
 
+  segment_template = gst_dash_manager_segment_template (b_manager, pad);
+
   /* FIXME: Add audio channels */
   pad_name = gst_pad_get_name (pad);
   pad_caps = gst_pad_get_current_caps (pad);
   mime_type = gst_structure_get_name (gst_caps_get_structure (pad_caps, 0));
-  ret = gst_media_presentation_add_stream (manager->mpd, type,
+  ret = gst_media_presentation_add_stream (manager->mpd, type, segment_template,
       pad_name, mime_type, width, height, par_n, par_d, framerate,
       NULL, samplerate, bitrate, lang, b_manager->fragment_duration);
   g_free (pad_name);
@@ -234,6 +239,24 @@ gst_dash_manager_fragment_name (GstStreamsManager * manager,
     name = g_strdup_printf ("%s_%s%s", manager->title,
         manager->fragment_prefix, extension);
   }
+  frag_filename = g_build_path (G_DIR_SEPARATOR_S, pad_name, name, NULL);
+  g_free (name);
+  g_free (pad_name);
+
+  return frag_filename;
+}
+
+static gchar *
+gst_dash_manager_segment_template (GstStreamsManager * manager, GstPad * pad)
+{
+  gchar *name, *frag_filename, *pad_name;
+  const gchar *extension;
+
+  pad_name = gst_pad_get_name (pad);
+  extension = gst_dash_manager_get_extension (manager, pad);
+  name = g_strdup_printf ("%s_%s_$Number$%s", manager->title,
+      manager->fragment_prefix, extension);
+
   frag_filename = g_build_path (G_DIR_SEPARATOR_S, pad_name, name, NULL);
   g_free (name);
   g_free (pad_name);

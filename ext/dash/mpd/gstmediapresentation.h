@@ -62,7 +62,7 @@ GstPeriod * gst_media_presentation_current_period     (GstMediaPresentation *mpd
 void gst_media_presentation_clear                     (GstMediaPresentation *mpd);
 
 gboolean gst_media_presentation_add_stream            (GstMediaPresentation *mpd,
-                                                       StreamType type, gchar *id,
+                                                       StreamType type, gchar *segment_template, gchar *id,
                                                        const gchar *mimeType, guint32 width,
                                                        guint32 height, guint32 parx,
                                                        guint32 pary, gdouble frameRate,

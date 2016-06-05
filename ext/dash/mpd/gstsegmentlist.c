@@ -24,7 +24,8 @@
 #include "gstxmlhelper.h"
 
 GstSegmentList *
-gst_segment_list_new (guint fragment_duration, gboolean use_ranges)
+gst_segment_list_new (guint fragment_duration, gboolean use_ranges,
+    gchar * segment_template)
 {
   GstSegmentList *info;
 
@@ -33,6 +34,7 @@ gst_segment_list_new (guint fragment_duration, gboolean use_ranges)
   info->start_index = 0;
   info->base_urls = NULL;
   info->init_segment = NULL;
+  info->segment_template = g_strdup (segment_template);
   info->segments = NULL;
   info->use_ranges = use_ranges;
   info->fragment_duration = fragment_duration;
@@ -142,6 +144,43 @@ gst_segment_list_get_average_bitrate (GstSegmentList * info)
   }
 
   return GST_ROUND_UP_64 (size / (info->duration / GST_SECOND));
+}
+
+gboolean
+gst_segment_list_render_template (GstSegmentList * info,
+    xmlTextWriterPtr writer)
+{
+  GList *tmp;
+
+  tmp = g_list_first (info->segments);
+  if (tmp == NULL)
+    return TRUE;
+
+  /* Start SegmentTemplate */
+  if (!gst_media_presentation_start_element (writer, "SegmentTemplate"))
+    return FALSE;
+
+  if (!gst_media_presentation_write_string_attribute (writer, "media",
+          info->segment_template))
+    return FALSE;
+
+  if (!gst_media_presentation_write_uint32_attribute (writer, "timescale",
+          1000))
+    return FALSE;
+
+  if (!gst_media_presentation_write_uint32_attribute (writer, "duration",
+          info->fragment_duration / GST_MSECOND))
+    return FALSE;
+
+  if (!gst_media_presentation_write_string_attribute (writer, "initialization",
+          info->init_segment->url))
+    return FALSE;
+
+  /* End SegmentList */
+  if (!gst_media_presentation_end_element (writer))
+    return FALSE;
+
+  return TRUE;
 }
 
 gboolean

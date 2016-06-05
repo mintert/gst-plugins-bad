@@ -189,6 +189,108 @@ gst_adaptation_set_get_duration (GstAdaptationSet * adaptation_set)
 }
 
 gboolean
+gst_adaptation_set_render_template (GstAdaptationSet * adaptation_set,
+    xmlTextWriterPtr writer)
+{
+  GHashTableIter iter;
+  GstRepresentation *rep;
+  gchar *id;
+
+  /* Start AdaptationSet and write attributes */
+  if (!gst_media_presentation_start_element (writer, "AdaptationSet"))
+    return FALSE;
+  if (!gst_media_common_render (&adaptation_set->common, writer))
+    return FALSE;
+  if (!gst_media_presentation_write_uint32_attribute (writer, "minBandwidth",
+          adaptation_set->minBandwidth))
+    return FALSE;
+  if (!gst_media_presentation_write_uint32_attribute (writer, "maxBandwidth",
+          adaptation_set->maxBandwidth))
+    return FALSE;
+  if (!gst_media_presentation_write_uint32_attribute (writer, "minWidth",
+          adaptation_set->minWidth))
+    return FALSE;
+  if (!gst_media_presentation_write_uint32_attribute (writer, "maxWidth",
+          adaptation_set->maxWidth))
+    return FALSE;
+  if (!gst_media_presentation_write_uint32_attribute (writer, "minHeight",
+          adaptation_set->minHeight))
+    return FALSE;
+  if (!gst_media_presentation_write_uint32_attribute (writer, "maxHeight",
+          adaptation_set->maxHeight))
+    return FALSE;
+  if (!gst_media_presentation_write_double_attribute (writer, "minFramerate",
+          adaptation_set->minFramerate))
+    return FALSE;
+  if (!gst_media_presentation_write_double_attribute (writer, "minFramerate",
+          adaptation_set->maxFramerate))
+    return FALSE;
+  if (!gst_media_presentation_write_bool_attribute (writer,
+          "segmentAlignment", adaptation_set->segmentAlignment))
+    return FALSE;
+  if (!gst_media_presentation_write_bool_attribute (writer,
+          "subsegmentAlignment", adaptation_set->subsegmentAlignment))
+    return FALSE;
+  if (!gst_media_presentation_write_bool_attribute (writer,
+          "bitstreamSwitching", adaptation_set->bitStreamSwitching))
+    return FALSE;
+
+  switch (adaptation_set->common.stream_type) {
+    case STREAM_TYPE_VIDEO:{
+      if (!gst_media_presentation_start_element (writer, "ContentComponent"))
+        return FALSE;
+      if (!gst_media_presentation_write_uint32_attribute (writer, "id", 1))
+        return FALSE;
+      if (!gst_media_presentation_write_string_attribute (writer,
+              "contentType", "video"))
+        return FALSE;
+      if (!gst_media_presentation_end_element (writer))
+        return FALSE;
+      break;
+    }
+    case STREAM_TYPE_AUDIO:{
+      if (!gst_media_presentation_start_element (writer, "ContentComponent"))
+        return FALSE;
+      if (!gst_media_presentation_write_uint32_attribute (writer, "id", 1))
+        return FALSE;
+      if (!gst_media_presentation_write_string_attribute (writer,
+              "contentType", "audio"))
+        return FALSE;
+      if (!gst_media_presentation_end_element (writer))
+        return FALSE;
+      break;
+    }
+    case STREAM_TYPE_SUBTITLE:{
+      if (!gst_media_presentation_start_element (writer, "Role"))
+        return FALSE;
+      if (!gst_media_presentation_write_string_attribute (writer, "schemeIdUri",
+              "urn:mpeg:dash:role:2011"))
+        return FALSE;
+      if (!gst_media_presentation_write_string_attribute (writer,
+              "value", "subtitle"))
+        return FALSE;
+      if (!gst_media_presentation_end_element (writer))
+        return FALSE;
+      break;
+    }
+    default:
+      break;
+  }
+
+  /* Write representations */
+  g_hash_table_iter_init (&iter, adaptation_set->representations);
+  while (g_hash_table_iter_next (&iter, (void *) &id, (void *) &rep)) {
+    if (!gst_representation_render_template (rep, writer))
+      return FALSE;
+  }
+
+  if (!gst_media_presentation_end_element (writer))
+    return FALSE;
+
+  return TRUE;
+}
+
+gboolean
 gst_adaptation_set_render (GstAdaptationSet * adaptation_set,
     xmlTextWriterPtr writer)
 {

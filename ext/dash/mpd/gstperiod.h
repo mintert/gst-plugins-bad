@@ -58,5 +58,6 @@ gboolean gst_period_set_init_segment (GstPeriod * period, gchar* id,
     GstMediaSegment *segment_info);
 guint64 gst_period_get_duration (GstPeriod *period);
 gboolean gst_period_render (GstPeriod *period, xmlTextWriterPtr writer);
+gboolean gst_period_render_template (GstPeriod *period, xmlTextWriterPtr writer);
 
 #endif

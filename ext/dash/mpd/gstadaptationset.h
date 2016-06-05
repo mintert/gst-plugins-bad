@@ -78,4 +78,7 @@ guint64 gst_adaptation_set_get_duration                   (GstAdaptationSet *ada
 gboolean gst_adaptation_set_render                        (GstAdaptationSet *adaptation_set,
 		                                           xmlTextWriterPtr writer);
 
+gboolean gst_adaptation_set_render_template               (GstAdaptationSet *adaptation_set,
+		                                           xmlTextWriterPtr writer);
+
 #endif

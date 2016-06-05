@@ -28,7 +28,7 @@
 #define SCHEMA_2011 "urn:mpeg:dash:schema:mpd:2011"
 #define PROFILE_ISOFF_ONDEMAND "urn:mpeg:dash:profile:isoff-on-demand:2011"
 #define PROFILE_MPEGTS_ONDEMAND "urn:mpeg:dash:profile:mp2t-on-demand:2011"
-#define PROFILE_ISOFF_LIVE "urn:mpeg:dash:profile:isoff-main:2011"
+#define PROFILE_ISOFF_LIVE "urn:mpeg:dash:profile:isoff-live:2011"
 #define PROFILE_MPEGTS_LIVE "urn:mpeg:dash:profile:mp2t-live:2011"
 #define TYPE_ONDEMAND "static"
 #define TYPE_LIVE "dynamic"
@@ -149,9 +149,9 @@ gst_media_presentation_add_profile (GstMediaPresentation * mpd,
 
 gboolean
 gst_media_presentation_add_stream (GstMediaPresentation * mpd, StreamType type,
-    gchar * id, const gchar * mimeType, guint32 width, guint32 height,
-    guint32 parx, guint32 pary, gdouble frameRate, gchar * channels,
-    guint32 samplingRate, guint32 bitrate, const gchar * lang,
+    gchar * segment_template, gchar * id, const gchar * mimeType, guint32 width,
+    guint32 height, guint32 parx, guint32 pary, gdouble frameRate,
+    gchar * channels, guint32 samplingRate, guint32 bitrate, const gchar * lang,
     guint fragment_duration)
 {
   GstPeriod *active_period;
@@ -176,9 +176,9 @@ gst_media_presentation_add_stream (GstMediaPresentation * mpd, StreamType type,
 
   /* Add a new presentation to the active period */
   rep =
-      gst_representation_new (id, type, mpd_mime_type, width, height, parx,
-      pary, frameRate, channels, samplingRate, bitrate, lang, mpd->use_ranges,
-      fragment_duration);
+      gst_representation_new (id, type, segment_template, mpd_mime_type, width,
+      height, parx, pary, frameRate, channels, samplingRate, bitrate, lang,
+      mpd->use_ranges, fragment_duration);
   g_free (mpd_mime_type);
 
   return gst_period_add_representation (active_period, rep);
@@ -292,8 +292,6 @@ gst_media_presentation_render (GstMediaPresentation * mpd)
   xmlBufferPtr buf = NULL;
   gchar *mpd_str = NULL;
 
-  mpd->timeShiftBufferDepth = gst_media_presentation_get_duration (mpd);
-
   /* Create a new XML buffer, to which the XML document will be
    * written */
   buf = xmlBufferCreate ();
@@ -336,9 +334,11 @@ gst_media_presentation_render (GstMediaPresentation * mpd)
           "xsi:schemaLocation", SCHEMA_2011))
     goto error;
 
-  if (!gst_media_presentation_write_time_attribute (writer,
-          "timeShiftBufferDepth", mpd->timeShiftBufferDepth))
-    goto error;
+  if (mpd->type != MEDIA_PRESENTATION_TYPE_LIVE) {
+    if (!gst_media_presentation_write_time_attribute (writer,
+            "timeShiftBufferDepth", mpd->timeShiftBufferDepth))
+      goto error;
+  }
 
   if (!gst_media_presentation_write_string_list_attribute (writer, "profiles",
           mpd->profiles))
@@ -348,9 +348,11 @@ gst_media_presentation_render (GstMediaPresentation * mpd)
           gst_media_presentation_render_type (mpd)))
     goto error;
 
-  if (!gst_media_presentation_write_time_attribute (writer,
-          "mediaPresentationDuration", mpd->mediaPresentationDuration))
-    goto error;
+  if (mpd->type != MEDIA_PRESENTATION_TYPE_LIVE) {
+    if (!gst_media_presentation_write_time_attribute (writer,
+            "mediaPresentationDuration", mpd->mediaPresentationDuration))
+      goto error;
+  }
 
   if (!gst_media_presentation_write_time_seconds_attribute (writer,
           "suggestedPresentationDelay", mpd->minBufferTime * 2))
@@ -360,9 +362,15 @@ gst_media_presentation_render (GstMediaPresentation * mpd)
           "minBufferTime", mpd->minBufferTime))
     goto error;
 
-  if (!gst_media_presentation_write_time_seconds_attribute (writer,
-          "minimumUpdatePeriod", mpd->minBufferTime))
-    goto error;
+  if (mpd->type == MEDIA_PRESENTATION_TYPE_LIVE) {
+    if (!gst_media_presentation_write_time_seconds_attribute (writer,
+            "minimumUpdatePeriod", 30 * 60 * GST_SECOND))
+      goto error;
+  } else {
+    if (!gst_media_presentation_write_time_seconds_attribute (writer,
+            "minimumUpdatePeriod", mpd->minBufferTime))
+      goto error;
+  }
 
   if (!gst_media_presentation_write_date_attribute (writer,
           "availabilityStartTime", mpd->availabilityStartTime))
@@ -387,8 +395,13 @@ gst_media_presentation_render (GstMediaPresentation * mpd)
     GList *tmp = g_list_first (mpd->periods);
 
     while (tmp != NULL) {
-      if (!gst_period_render ((GstPeriod *) tmp->data, writer))
-        goto error;
+      if (mpd->type == MEDIA_PRESENTATION_TYPE_LIVE) {
+        if (!gst_period_render_template ((GstPeriod *) tmp->data, writer))
+          goto error;
+      } else {
+        if (!gst_period_render ((GstPeriod *) tmp->data, writer))
+          goto error;
+      }
       tmp = g_list_next (tmp);
     }
   }

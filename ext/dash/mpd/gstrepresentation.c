@@ -26,7 +26,7 @@
 
 GstRepresentation *
 gst_representation_new (gchar * id, StreamType stream_type,
-    const gchar * mimeType, guint32 width,
+    gchar * segment_template, const gchar * mimeType, guint32 width,
     guint32 height, guint32 parx, guint32 pary, gdouble frameRate,
     gchar * channels, guint32 samplingRate, guint32 bitrate, const gchar * lang,
     gboolean use_ranges, guint fragment_duration)
@@ -56,7 +56,8 @@ gst_representation_new (gchar * id, StreamType stream_type,
   rep->id = g_strdup (id);
   rep->bandwidth = bitrate;
   rep->startWithRAP = TRUE;
-  rep->segment_list = gst_segment_list_new (fragment_duration, use_ranges);
+  rep->segment_list =
+      gst_segment_list_new (fragment_duration, use_ranges, segment_template);
 
   return rep;
 }
@@ -112,7 +113,8 @@ gst_representation_get_duration (GstRepresentation * rep)
 }
 
 gboolean
-gst_representation_render (GstRepresentation * rep, xmlTextWriterPtr writer)
+gst_representation_render_template (GstRepresentation * rep,
+    xmlTextWriterPtr writer)
 {
   /* Start Representation */
   if (!gst_media_presentation_start_element (writer, "Representation"))
@@ -120,6 +122,33 @@ gst_representation_render (GstRepresentation * rep, xmlTextWriterPtr writer)
   /* set static encoder profile and level, for now (constrained-baseline 4.0) */
   gst_media_presentation_write_string_attribute (writer, "codecs",
       "avc1.42001f");
+  if (!gst_media_presentation_write_uint32_attribute (writer, "bandwidth",
+          rep->bandwidth))
+    return FALSE;
+  if (!gst_media_presentation_write_string_attribute (writer, "id", rep->id))
+    return FALSE;
+  if (!gst_media_presentation_write_bool_attribute (writer, "startWithRAP",
+          rep->startWithRAP))
+    return FALSE;
+  if (!gst_media_common_render (&rep->common, writer))
+    return FALSE;
+
+  /* write SegmentList */
+  if (!gst_segment_list_render_template (rep->segment_list, writer))
+    return FALSE;
+
+  if (!gst_media_presentation_end_element (writer))
+    return FALSE;
+
+  return TRUE;
+}
+
+gboolean
+gst_representation_render (GstRepresentation * rep, xmlTextWriterPtr writer)
+{
+  /* Start Representation */
+  if (!gst_media_presentation_start_element (writer, "Representation"))
+    return FALSE;
   if (!gst_media_presentation_write_uint32_attribute (writer, "bandwidth",
           rep->bandwidth))
     return FALSE;

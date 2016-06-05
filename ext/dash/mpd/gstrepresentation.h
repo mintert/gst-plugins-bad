@@ -41,7 +41,7 @@ struct _GstRepresentation
 };
 
 
-GstRepresentation * gst_representation_new  (gchar *id, StreamType stream_type,
+GstRepresentation * gst_representation_new  (gchar *id, StreamType stream_type, gchar *fragment_template,
                                              const gchar *mimeType, guint32 width,
                                              guint32 height, guint32 parx, guint32 pary,
                                              gdouble frameRate, gchar* channels,
@@ -62,6 +62,9 @@ void gst_representation_add_base_url         (GstRepresentation * rep, gchar *ur
 guint64 gst_representation_get_duration      (GstRepresentation *mdp);
 
 gboolean gst_representation_render           (GstRepresentation *rep,
+                                              xmlTextWriterPtr writer);
+
+gboolean gst_representation_render_template  (GstRepresentation *rep,
                                               xmlTextWriterPtr writer);
 
 #endif
