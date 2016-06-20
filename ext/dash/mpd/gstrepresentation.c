@@ -120,8 +120,23 @@ gst_representation_render_template (GstRepresentation * rep,
   if (!gst_media_presentation_start_element (writer, "Representation"))
     return FALSE;
   /* set static encoder profile and level, for now (constrained-baseline 4.0) */
-  gst_media_presentation_write_string_attribute (writer, "codecs",
-      "avc1.42001f");
+  switch (rep->common.stream_type) {
+    case STREAM_TYPE_VIDEO:{
+      if (!gst_media_presentation_write_string_attribute (writer, "codecs",
+          "avc1.42001f"))
+        return FALSE;
+      break;
+    }
+    case STREAM_TYPE_AUDIO:{
+      if (!gst_media_presentation_write_string_attribute (writer, "codecs",
+          "mp4a.40.2"))
+        return FALSE;
+      break;
+    }
+    default:
+      break;
+  }
+
   if (!gst_media_presentation_write_uint32_attribute (writer, "bandwidth",
           rep->bandwidth))
     return FALSE;
